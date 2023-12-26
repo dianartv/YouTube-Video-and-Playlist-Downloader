@@ -4,17 +4,14 @@ from engine.service.logger import logger
 
 if __name__ == '__main__':
 
-    youtube_playlist_url = ''
-    save_to = r'data\playlists'
+    youtube_playlist_url = 'https://www.youtube.com/playlist?list=PL0TLlA6h3_uA5miXyPDWVJoba0O2Qpc0O'
+    resolution = 720
 
     try:
         playlist = DownloadYTPlaylist(playlist_url=youtube_playlist_url)
 
         playlist.download(
-            resolution=7201,
-            save_to=f'{save_to}\\{playlist.playlist_title}'
+            resolution=resolution,
         )
     except EmptyPlaylist:
         logger.warning(f'Playlist is empty.')
-
-

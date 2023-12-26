@@ -1,9 +1,13 @@
+import os
+
 from pytube import YouTube as PyYT
 from pytube import Playlist
 
+from engine.converter.converter import convert_video_to_audio_ffmpeg
 from engine.service.logger import logger
 
 from engine.errors.errors_handler import ItagDoesNotExist, EmptyPlaylist
+from engine.service.tools import remove_temporary_files
 
 
 class YouTube(PyYT):
@@ -86,26 +90,36 @@ class YouTube(PyYT):
         return self.title
 
 
-class DownloadYTVideo:
-    """Загружает видео с PyYT."""
+class DownloadYTContent:
+    """Загрузка одиночного материала с YT."""
 
     def __init__(self, video: YouTube) -> None:
         self.video = video
 
-    def download(self, resolution: int, save_to: str) -> None:
+    def download_video(self, resolution: int) -> None:
         """Загрузка одиночного видео."""
         itag = get_resolution_itag(resolution=resolution,
                                    video=self.video)
         stream = self.video.streams.get_by_itag(itag)
-        stream.download(save_to)
+        video_dir = os.path.join(os.getcwd(), 'data', 'videos')
+        stream.download(video_dir)
 
-    def download_audio(self, save_to: str) -> None:
-        """Загрузка одиночного видео."""
+    def download_audio(self) -> None:
+        """Загрузка audio."""
+
         itag = self.video.get_video_stream_format_codes(type='only_audio')
         best_quality_itag = get_best_quality_audio_itag(itag)
         stream = self.video.streams.get_by_itag(best_quality_itag)
         self.video.default_filename = stream.default_filename
-        stream.download(save_to)
+
+        audio_dir = os.path.join(os.getcwd(), 'data', 'audios')
+        stream.download(audio_dir)
+
+        convert_video_to_audio_ffmpeg(
+            video_file=f'{audio_dir}\\{self.video.default_filename}'
+        )
+
+        remove_temporary_files(folder=audio_dir)
 
 
 class DownloadYTPlaylist:
@@ -123,10 +137,13 @@ class DownloadYTPlaylist:
         else:
             raise EmptyPlaylist('Плейлист пуст.')
 
-    def download(self, resolution: int, save_to: str) -> None:
+    def download(self, resolution: int) -> None:
+        playlist_dir = os.path.join(os.getcwd(), 'data',
+                                    'playlists', self.playlist_title)
         for v in self.playlist:
-            video = DownloadYTVideo(v)
-            video.download(resolution=resolution, save_to=save_to)
+            video = DownloadYTContent(v)
+            video.download_video(resolution=resolution,
+                                 save_to=playlist_dir)
 
 
 def get_resolution_itag(resolution: int, video: YouTube) -> int:

@@ -21,7 +21,6 @@ def remove_temporary_files(
 
     def _get_dir_files(path: str) -> list:
         """Все файлы в директории."""
-        x = [i for i in os.walk(path)]
         for root, dirs, files in os.walk(path):
             return files
 
