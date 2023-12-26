@@ -13,7 +13,7 @@ class YouTube(PyYT):
     """
 
     def get_video_stream_format_codes(self,
-                                      only_video=True,
+                                      type='only_video',
                                       sorted_by_itag=True,
                                       sorted_by_resolution=True):
         """Получение списка Itag кодов, с возможностью сортировки."""
@@ -23,6 +23,11 @@ class YouTube(PyYT):
         def _get_only_video_type(items: list) -> list:
             return list(
                 filter(lambda v: v.type == 'video', items)
+            )
+
+        def _get_only_audio_type(items: list) -> list:
+            return list(
+                filter(lambda v: v.type == 'audio', items)
             )
 
         def _sorted_by_itag(items: list) -> list:
@@ -39,14 +44,17 @@ class YouTube(PyYT):
                 )
             )
 
-        if only_video:
+        if type == 'only_video':
             video_fmt_streams = _get_only_video_type(video_fmt_streams)
 
-        if sorted_by_itag:
-            video_fmt_streams = _sorted_by_itag(video_fmt_streams)
+            if sorted_by_itag:
+                video_fmt_streams = _sorted_by_itag(video_fmt_streams)
 
-        if sorted_by_resolution:
-            video_fmt_streams = _sorted_by_resolution(video_fmt_streams)
+            if sorted_by_resolution:
+                video_fmt_streams = _sorted_by_resolution(video_fmt_streams)
+
+        elif type == 'only_audio':
+            video_fmt_streams = _get_only_audio_type(video_fmt_streams)
 
         return video_fmt_streams
 
@@ -91,6 +99,14 @@ class DownloadYTVideo:
         stream = self.video.streams.get_by_itag(itag)
         stream.download(save_to)
 
+    def download_audio(self, save_to: str) -> None:
+        """Загрузка одиночного видео."""
+        itag = self.video.get_video_stream_format_codes(type='only_audio')
+        best_quality_itag = get_best_quality_audio_itag(itag)
+        stream = self.video.streams.get_by_itag(best_quality_itag)
+        self.video.default_filename = stream.default_filename
+        stream.download(save_to)
+
 
 class DownloadYTPlaylist:
 
@@ -121,3 +137,9 @@ def get_resolution_itag(resolution: int, video: YouTube) -> int:
         logger.warning(f'Разрешение {resolution} недоступно.')
         logger.info(f'Установлено лучшее качество.')
     return itag
+
+
+def get_best_quality_audio_itag(itags: list) -> int:
+    """Возвращает лучшего качествао Itag audio."""
+    itag = list(sorted(itags, key=lambda stream: stream.bitrate, reverse=True))
+    return itag[0].itag
