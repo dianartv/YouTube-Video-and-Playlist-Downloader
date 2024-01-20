@@ -7,7 +7,7 @@ from engine.converter.converter import convert_video_to_audio_ffmpeg
 from engine.service.logger import logger
 
 from engine.errors.errors_handler import ItagDoesNotExist, EmptyPlaylist
-from engine.service.tools import remove_temporary_files
+from engine.service.tools import remove_temporary_files, make_allowed_format
 
 
 class YouTube(PyYT):
@@ -16,10 +16,12 @@ class YouTube(PyYT):
     кода кач-ва видео Itag.
     """
 
-    def get_video_stream_format_codes(self,
-                                      type='only_video',
-                                      sorted_by_itag=True,
-                                      sorted_by_resolution=True):
+    def get_video_stream_format_codes(
+            self,
+            format_type: str = 'only_video',
+            sorted_by_itag: bool = True,
+            sorted_by_resolution: bool = True
+    ) -> list:
         """Получение списка Itag кодов, с возможностью сортировки."""
 
         video_fmt_streams = self.fmt_streams
@@ -48,8 +50,14 @@ class YouTube(PyYT):
                 )
             )
 
-        if type == 'only_video':
+        def _remove_non_resolution_itags(items: list) -> list:
+            return list(
+                filter(lambda itag: itag.resolution is not None, items)
+            )
+
+        if format_type == 'only_video':
             video_fmt_streams = _get_only_video_type(video_fmt_streams)
+            video_fmt_streams = _remove_non_resolution_itags(video_fmt_streams)
 
             if sorted_by_itag:
                 video_fmt_streams = _sorted_by_itag(video_fmt_streams)
@@ -57,7 +65,7 @@ class YouTube(PyYT):
             if sorted_by_resolution:
                 video_fmt_streams = _sorted_by_resolution(video_fmt_streams)
 
-        elif type == 'only_audio':
+        elif format_type == 'only_audio':
             video_fmt_streams = _get_only_audio_type(video_fmt_streams)
 
         return video_fmt_streams
@@ -86,18 +94,49 @@ class YouTube(PyYT):
                 f'У видео нет значения Itag для {resolution}'
             )
 
-    def __str__(self):
-        return self.title
+
+class VideoDownloader:
+    """Загрузка одиночного видео.
+
+    hight: наивысшее разрешение [hight | low]
+    low: наименьшее разрешение
+    output_path: куда сохранить видео
+    """
+
+    def __init__(self, video_url: str,
+                 quality: str = 'hight',
+                 output_path: str = 'data/videos') -> None:
+        self.video_url = video_url
+        self.quality = quality
+        self.output_path = output_path
+
+    def download(self):
+        video = YouTube(url=self.video_url)
+        streams = video.streams
+        stream = self._set_stream_quality(streams)
+        stream.download(
+            output_path=self.output_path,
+            filename=f'{make_allowed_format(video.title)}'
+                     f'.{stream.subtype}'
+        )
+
+    def _set_stream_quality(self, streams: 'StreamQuery') -> 'Stream':
+        if self.quality == 'low':
+            return streams.get_lowest_resolution()
+        else:
+            return streams.get_highest_resolution()
 
 
 class DownloadYTContent:
     """Загрузка одиночного материала с YT."""
 
+    # комментарий
     def __init__(self, video: YouTube) -> None:
         self.video = video
 
     def download_video(self, resolution: int) -> None:
         """Загрузка одиночного видео."""
+
         itag = get_resolution_itag(resolution=resolution,
                                    video=self.video)
         stream = self.video.streams.get_by_itag(itag)
@@ -107,7 +146,8 @@ class DownloadYTContent:
     def download_audio(self) -> None:
         """Загрузка audio."""
 
-        itag = self.video.get_video_stream_format_codes(type='only_audio')
+        itag = self.video.get_video_stream_format_codes(
+            format_type='only_audio')
         best_quality_itag = get_best_quality_audio_itag(itag)
         stream = self.video.streams.get_by_itag(best_quality_itag)
         self.video.default_filename = stream.default_filename

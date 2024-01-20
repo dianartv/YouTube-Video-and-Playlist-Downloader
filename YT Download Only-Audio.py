@@ -5,7 +5,7 @@ from engine.service.logger import logger
 
 if __name__ == '__main__':
 
-    video_url = 'https://www.youtube.com/watch?v=d-fq6IOu8XA'
+    video_url = 'https://www.youtube.com/watch?v=6Pk4OgdNxXQ'
 
     try:
         save_from_yt = DownloadYTContent(video=YouTube(url=video_url))
