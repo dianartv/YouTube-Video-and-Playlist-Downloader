@@ -1,3 +1,11 @@
-.idea
-venv
+.idea/
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+data/
+content/*
+!content/__init__.py
+logs/*.log
 test.py

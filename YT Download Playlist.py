@@ -1,8 +1,9 @@
 from engine.errors.errors_handler import EmptyPlaylist
 from engine.youtube_tools.youtube_tools import DownloadYTPlaylist
-from engine.service.logger import logger
+from engine.service.logger import configure_file_logger, logger
 
 if __name__ == '__main__':
+    configure_file_logger()
 
     youtube_playlist_url = ''
     save_to = r'data\playlists'

@@ -1,9 +1,22 @@
 import logging
+from pathlib import Path
 
-logger = logging
+logger = logging.getLogger("youtube_downloader")
+logger.setLevel(logging.INFO)
 
-logger.basicConfig(level=logging.INFO,
-                   filename=r"logs\logs.log",
-                   filemode="a",
-                   format="%(asctime)s %(levelname)s %(message)s",
-                   encoding='utf-8')
+
+def configure_file_logger(log_dir: str | Path = "logs") -> None:
+    log_dir = Path(log_dir)
+    log_dir.mkdir(exist_ok=True)
+    log_file = (log_dir / "logs.log").resolve()
+
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            if Path(handler.baseFilename).resolve() == log_file:
+                return
+
+    handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    )
+    logger.addHandler(handler)
