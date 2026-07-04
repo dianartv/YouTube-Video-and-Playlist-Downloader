@@ -8,6 +8,9 @@ DEFAULT_VIDEO_QUALITY = 720
 DEFAULT_MP3_BITRATE = 320
 DEFAULT_FFMPEG_PATH = "ffmpeg"
 DEFAULT_FULL_AUTO = True
+DEFAULT_WORKER_LIMIT = 4
+MIN_WORKER_LIMIT = 1
+MAX_WORKER_LIMIT = 8
 DEFAULT_ENV_PATH = Path(".env")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -20,6 +23,7 @@ class AppConfig:
     default_mp3_bitrate: int
     ffmpeg_path: str
     full_auto: bool
+    worker_limit: int
 
 
 def ensure_env_file(path: Path = DEFAULT_ENV_PATH) -> None:
@@ -35,6 +39,7 @@ def ensure_env_file(path: Path = DEFAULT_ENV_PATH) -> None:
                 f"DEFAULT_MP3_BITRATE={DEFAULT_MP3_BITRATE}",
                 f"FFMPEG_PATH={DEFAULT_FFMPEG_PATH}",
                 f"FULL_AUTO={int(DEFAULT_FULL_AUTO)}",
+                f"WORKER_LIMIT={DEFAULT_WORKER_LIMIT}",
                 "",
             ]
         ),
@@ -50,6 +55,7 @@ def load_config(path: Path = DEFAULT_ENV_PATH) -> AppConfig:
         "DEFAULT_MP3_BITRATE": str(DEFAULT_MP3_BITRATE),
         "FFMPEG_PATH": DEFAULT_FFMPEG_PATH,
         "FULL_AUTO": str(int(DEFAULT_FULL_AUTO)),
+        "WORKER_LIMIT": str(DEFAULT_WORKER_LIMIT),
     }
     values.update(_read_env_file(path))
 
@@ -69,6 +75,8 @@ def load_config(path: Path = DEFAULT_ENV_PATH) -> AppConfig:
     if default_mp3_bitrate <= 0:
         raise ValueError("DEFAULT_MP3_BITRATE must be greater than zero")
 
+    worker_limit = _parse_worker_limit(values["WORKER_LIMIT"])
+
     return AppConfig(
         download_dir=_resolve_download_dir(values["DOWNLOAD_DIR"]),
         audio_download_dir=_resolve_download_dir(values["AUDIO_DOWNLOAD_DIR"]),
@@ -76,7 +84,32 @@ def load_config(path: Path = DEFAULT_ENV_PATH) -> AppConfig:
         default_mp3_bitrate=default_mp3_bitrate,
         ffmpeg_path=values["FFMPEG_PATH"].strip() or DEFAULT_FFMPEG_PATH,
         full_auto=_parse_bool(values["FULL_AUTO"]),
+        worker_limit=worker_limit,
     )
+
+
+def save_worker_limit(value: int, path: Path = DEFAULT_ENV_PATH) -> None:
+    worker_limit = _validate_worker_limit(value)
+    if not path.exists():
+        ensure_env_file(path)
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    updated = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+
+        key, _ = stripped.split("=", 1)
+        if key.strip() == "WORKER_LIMIT":
+            lines[index] = f"WORKER_LIMIT={worker_limit}"
+            updated = True
+            break
+
+    if not updated:
+        lines.append(f"WORKER_LIMIT={worker_limit}")
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -127,3 +160,17 @@ def _parse_bool(raw_value: str) -> bool:
         return False
 
     raise ValueError("FULL_AUTO must be 1 or 0")
+
+
+def _parse_worker_limit(raw_value: str) -> int:
+    try:
+        return _validate_worker_limit(int(raw_value))
+    except ValueError as exc:
+        raise ValueError("WORKER_LIMIT must be an integer from 1 to 8") from exc
+
+
+def _validate_worker_limit(value: int) -> int:
+    if value < MIN_WORKER_LIMIT or value > MAX_WORKER_LIMIT:
+        raise ValueError("WORKER_LIMIT must be from 1 to 8")
+
+    return value

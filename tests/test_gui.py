@@ -21,15 +21,16 @@ class GuiTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_main_window_has_video_audio_and_playlist_tabs(self):
+    def test_main_window_has_video_audio_playlist_and_settings_tabs(self):
         window = MainWindow()
 
         tabs = window.findChild(QTabWidget)
 
-        self.assertEqual(tabs.count(), 3)
+        self.assertEqual(tabs.count(), 4)
         self.assertEqual(tabs.tabText(0), "Видео")
         self.assertEqual(tabs.tabText(1), "Аудио")
         self.assertEqual(tabs.tabText(2), "Плейлист")
+        self.assertEqual(tabs.tabText(3), "Настройки")
 
     def test_playlist_tab_can_select_video_or_audio_mode(self):
         window = MainWindow()
@@ -43,6 +44,31 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(playlist_tab.mode, AUDIO_MODE)
         self.assertIsNone(playlist_tab.video_quality_value())
+
+    def test_settings_tab_saves_worker_limit(self):
+        window = MainWindow()
+        tabs = window.findChild(QTabWidget)
+        settings_tab = tabs.widget(3)
+        settings_tab.worker_limit_select.setCurrentIndex(5)
+        saved_config = AppConfig(
+            download_dir=Path("content"),
+            audio_download_dir=Path("content/audio"),
+            default_video_quality=720,
+            default_mp3_bitrate=320,
+            ffmpeg_path="ffmpeg",
+            full_auto=True,
+            worker_limit=6,
+        )
+
+        with (
+            patch("engine.gui.app.save_worker_limit") as save_worker_limit,
+            patch("engine.gui.app.load_config", return_value=saved_config),
+        ):
+            settings_tab.save_settings()
+
+        save_worker_limit.assert_called_once_with(6)
+        self.assertIs(window.config, saved_config)
+        self.assertEqual(settings_tab.status_label.text(), "Сохранено")
 
     def test_download_finish_keeps_thread_until_thread_finished(self):
         window = MainWindow()
@@ -171,6 +197,7 @@ class GuiTests(unittest.TestCase):
                 default_mp3_bitrate=320,
                 ffmpeg_path="ffmpeg",
                 full_auto=True,
+                worker_limit=5,
             )
             worker = DownloadWorker(
                 mode=AUDIO_MODE,
@@ -192,6 +219,7 @@ class GuiTests(unittest.TestCase):
         download_playlist.assert_called_once()
         self.assertEqual(download_playlist.call_args.kwargs["media_mode"], AUDIO_MODE)
         self.assertEqual(download_playlist.call_args.kwargs["config"].audio_download_dir, output_dir)
+        self.assertEqual(download_playlist.call_args.kwargs["config"].worker_limit, 5)
         self.assertIs(download_playlist.call_args.kwargs["cancel_token"], worker.cancel_token)
 
 

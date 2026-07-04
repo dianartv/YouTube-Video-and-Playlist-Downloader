@@ -49,6 +49,7 @@ DEFAULT_VIDEO_QUALITY=720
 DEFAULT_MP3_BITRATE=320
 FFMPEG_PATH=ffmpeg
 FULL_AUTO=1
+WORKER_LIMIT=4
 ```
 
 Downloaded videos are written to `content/`. Audio-only MP3 files are written

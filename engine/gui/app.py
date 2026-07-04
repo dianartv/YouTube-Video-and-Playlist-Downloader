@@ -22,7 +22,14 @@ from PySide6.QtWidgets import (
 
 from engine.application.download_duplicates import format_duplicate_download
 from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
-from engine.service.config import PROJECT_ROOT, ensure_env_file, load_config
+from engine.service.config import (
+    MAX_WORKER_LIMIT,
+    MIN_WORKER_LIMIT,
+    PROJECT_ROOT,
+    ensure_env_file,
+    load_config,
+    save_worker_limit,
+)
 from engine.gui.workers import DownloadWorker
 
 
@@ -53,6 +60,7 @@ class MainWindow(QMainWindow):
             ),
             "Плейлист",
         )
+        tabs.addTab(SettingsTab(config=self.config, parent_window=self), "Настройки")
         self.setCentralWidget(tabs)
         self._apply_style()
 
@@ -379,6 +387,59 @@ class DownloadTab(QWidget):
             self.progress.setRange(0, 0)
         else:
             self.progress.setRange(0, 100)
+
+
+class SettingsTab(QWidget):
+    def __init__(self, *, config, parent_window: MainWindow) -> None:
+        super().__init__()
+        self.parent_window = parent_window
+
+        self.worker_limit_select = QComboBox()
+        for value in range(MIN_WORKER_LIMIT, MAX_WORKER_LIMIT + 1):
+            self.worker_limit_select.addItem(str(value), value)
+
+        index = max(
+            0,
+            min(
+                self.worker_limit_select.count() - 1,
+                int(config.worker_limit) - MIN_WORKER_LIMIT,
+            ),
+        )
+        self.worker_limit_select.setCurrentIndex(index)
+
+        self.save_button = QPushButton("Сохранить")
+        self.save_button.clicked.connect(self.save_settings)
+
+        self.status_label = QLabel("Ожидание")
+        self._build_layout()
+
+    def _build_layout(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(14)
+
+        form = QGridLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(10)
+        form.addWidget(QLabel("Лимит потоков"), 0, 0)
+        form.addWidget(self.worker_limit_select, 0, 1)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(10)
+        buttons.addWidget(self.save_button)
+        buttons.addWidget(self.status_label, stretch=1)
+
+        root.addLayout(form)
+        root.addLayout(buttons)
+        root.addStretch(1)
+
+    def worker_limit_value(self) -> int:
+        return int(self.worker_limit_select.currentData())
+
+    def save_settings(self) -> None:
+        save_worker_limit(self.worker_limit_value())
+        self.parent_window.config = load_config()
+        self.status_label.setText("Сохранено")
 
 
 def run() -> int:

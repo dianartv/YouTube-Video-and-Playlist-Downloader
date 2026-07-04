@@ -9,9 +9,11 @@ from engine.service.config import (
     DEFAULT_FULL_AUTO,
     DEFAULT_MP3_BITRATE,
     DEFAULT_VIDEO_QUALITY,
+    DEFAULT_WORKER_LIMIT,
     PROJECT_ROOT,
     ensure_env_file,
     load_config,
+    save_worker_limit,
 )
 
 
@@ -26,6 +28,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.default_mp3_bitrate, DEFAULT_MP3_BITRATE)
         self.assertEqual(config.ffmpeg_path, DEFAULT_FFMPEG_PATH)
         self.assertEqual(config.full_auto, DEFAULT_FULL_AUTO)
+        self.assertEqual(config.worker_limit, DEFAULT_WORKER_LIMIT)
 
     def test_ensure_env_file_writes_default_values(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -40,6 +43,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.default_mp3_bitrate, 320)
         self.assertEqual(config.ffmpeg_path, "ffmpeg")
         self.assertTrue(config.full_auto)
+        self.assertEqual(config.worker_limit, 4)
 
     def test_load_config_reads_custom_values(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -53,6 +57,7 @@ class ConfigTests(unittest.TestCase):
                         "DEFAULT_MP3_BITRATE=192",
                         "FFMPEG_PATH=tools/ffmpeg.exe",
                         "FULL_AUTO=0",
+                        "WORKER_LIMIT=7",
                         "",
                     ]
                 ),
@@ -67,6 +72,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.default_mp3_bitrate, 192)
         self.assertEqual(config.ffmpeg_path, "tools/ffmpeg.exe")
         self.assertFalse(config.full_auto)
+        self.assertEqual(config.worker_limit, 7)
 
     def test_load_config_rejects_invalid_default_quality(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -163,6 +169,36 @@ class ConfigTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 load_config(env_path)
+
+    def test_load_config_rejects_invalid_worker_limit(self):
+        invalid_values = ["0", "9", "many"]
+        for value in invalid_values:
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temp_dir:
+                env_path = Path(temp_dir) / ".env"
+                env_path.write_text(f"WORKER_LIMIT={value}\n", encoding="utf-8")
+
+                with self.assertRaises(ValueError):
+                    load_config(env_path)
+
+    def test_save_worker_limit_updates_existing_env_value(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / ".env"
+            ensure_env_file(env_path)
+
+            save_worker_limit(6, env_path)
+            config = load_config(env_path)
+
+        self.assertEqual(config.worker_limit, 6)
+
+    def test_save_worker_limit_appends_missing_env_value(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / ".env"
+            env_path.write_text("DOWNLOAD_DIR=content\n", encoding="utf-8")
+
+            save_worker_limit(3, env_path)
+            config = load_config(env_path)
+
+        self.assertEqual(config.worker_limit, 3)
 
 
 if __name__ == "__main__":

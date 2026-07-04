@@ -483,6 +483,7 @@ class PlaylistDownloadTests(unittest.TestCase):
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
             full_auto=True,
+            worker_limit=4,
         )
         token = CancellationToken()
         token.cancel()
@@ -515,6 +516,7 @@ class PlaylistDownloadTests(unittest.TestCase):
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
             full_auto=True,
+            worker_limit=6,
         )
         playlist = SimpleNamespace(
             title="My/Playlist?",
@@ -549,6 +551,7 @@ class PlaylistDownloadTests(unittest.TestCase):
         self.assertEqual(download_audio_mock.call_count, 2)
         for call in download_audio_mock.call_args_list:
             self.assertEqual(call.kwargs["config"].audio_download_dir, expected_dir)
+            self.assertEqual(call.kwargs["config"].worker_limit, 6)
         self.assertIn(f"Каталог плейлиста: {expected_dir}", output)
         self.assertIn("Готово. Успешно: 2. Пропущено/ошибок: 0.", output)
 
@@ -561,6 +564,7 @@ class PlaylistDownloadTests(unittest.TestCase):
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
             full_auto=True,
+            worker_limit=5,
         )
         playlist = SimpleNamespace(
             title="Videos",
@@ -594,6 +598,7 @@ class PlaylistDownloadTests(unittest.TestCase):
             download_video_mock.call_args.kwargs["config"].download_dir,
             expected_dir,
         )
+        self.assertEqual(download_video_mock.call_args.kwargs["config"].worker_limit, 5)
         self.assertIn(f"Каталог плейлиста: {expected_dir}", output)
 
 
