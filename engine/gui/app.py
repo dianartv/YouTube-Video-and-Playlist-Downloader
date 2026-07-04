@@ -1,7 +1,9 @@
 import sys
+import time
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Slot
+from PySide6.QtCore import QThread, QUrl, Slot
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -223,6 +225,7 @@ class DownloadTab(QWidget):
         self._mode = mode
         self.is_playlist = is_playlist
         self.parent_window = parent_window
+        self.started_at: float | None = None
 
         self.url_input = QLineEdit()
         placeholder = "Вставьте ссылку на плейлист" if is_playlist else "Вставьте ссылку на YouTube"
@@ -257,6 +260,9 @@ class DownloadTab(QWidget):
         self.cancel_button.clicked.connect(lambda: self.parent_window.request_cancel(self))
 
         self.status_label = QLabel("Ожидание")
+        self.show_output_button = QPushButton("Показать в проводнике")
+        self.show_output_button.hide()
+        self.show_output_button.clicked.connect(self.open_output_dir)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
@@ -264,6 +270,7 @@ class DownloadTab(QWidget):
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.elapsed_label = QLabel("Общее время выполнения: -")
 
         self._build_layout()
 
@@ -299,7 +306,9 @@ class DownloadTab(QWidget):
         status_row = QHBoxLayout()
         status_row.setSpacing(10)
         status_row.addWidget(QLabel("Статус:"))
-        status_row.addWidget(self.status_label, stretch=1)
+        status_row.addWidget(self.status_label)
+        status_row.addWidget(self.show_output_button)
+        status_row.addStretch(1)
         status_row.addWidget(self.progress, stretch=2)
 
         root.addLayout(form)
@@ -313,6 +322,7 @@ class DownloadTab(QWidget):
         root.addLayout(status_row)
         root.addWidget(QLabel("Логи"))
         root.addWidget(self.log_output, stretch=1)
+        root.addWidget(self.elapsed_label)
 
     def choose_output_dir(self) -> None:
         initial = self.output_dir_value()
@@ -347,8 +357,11 @@ class DownloadTab(QWidget):
         return int(self.quality_select.currentData())
 
     def prepare_for_download(self) -> None:
+        self.started_at = time.perf_counter()
         self.log_output.clear()
+        self.set_elapsed_time(0)
         self.set_status("Старт")
+        self.show_output_button.hide()
         self.set_progress_busy(True)
         self.download_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -359,17 +372,22 @@ class DownloadTab(QWidget):
         self.append_log("Пользователь подтвердил отмену.")
 
     def finish_download(self, *, success: bool, cancelled: bool = False) -> None:
+        self.finish_elapsed_time()
         self.download_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         if cancelled:
             self.set_status("Отменено")
+            self.show_output_button.hide()
             self.set_progress_busy(False)
             return
 
         if success:
             self.set_status("Готово")
+            self.show_output_button.show()
             self.set_progress_busy(False)
             self.set_progress(100)
+        else:
+            self.show_output_button.hide()
 
     def append_log(self, message: str) -> None:
         self.log_output.appendPlainText(message)
@@ -387,6 +405,25 @@ class DownloadTab(QWidget):
             self.progress.setRange(0, 0)
         else:
             self.progress.setRange(0, 100)
+
+    def finish_elapsed_time(self) -> None:
+        if self.started_at is None:
+            return
+
+        elapsed_seconds = time.perf_counter() - self.started_at
+        self.set_elapsed_time(elapsed_seconds)
+        self.started_at = None
+
+    def set_elapsed_time(self, seconds: float) -> None:
+        self.elapsed_label.setText(f"Общее время выполнения: {_format_elapsed_time(seconds)}")
+
+    def open_output_dir(self) -> None:
+        output_dir = self.output_dir_value()
+        if not output_dir.exists():
+            QMessageBox.warning(self, "Папка не найдена", f"Папка не существует: {output_dir}")
+            return
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_dir.resolve())))
 
 
 class SettingsTab(QWidget):
@@ -447,3 +484,13 @@ def run() -> int:
     window = MainWindow()
     window.show()
     return app.exec()
+
+
+def _format_elapsed_time(seconds: float) -> str:
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    return f"{minutes:02d}:{seconds:02d}"

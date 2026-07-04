@@ -88,12 +88,28 @@ class GuiTests(unittest.TestCase):
         self.assertIs(window.active_tab, audio_tab)
         self.assertTrue(audio_tab.download_button.isEnabled())
         self.assertEqual(audio_tab.status_label.text(), "Готово")
+        self.assertFalse(audio_tab.show_output_button.isHidden())
 
         window._thread_finished()
 
         self.assertIsNone(window.active_thread)
         self.assertIsNone(window.active_worker)
         self.assertIsNone(window.active_tab)
+
+    def test_download_finish_shows_total_elapsed_time_under_logs(self):
+        window = MainWindow()
+        tabs = window.findChild(QTabWidget)
+        audio_tab = tabs.widget(1)
+        window.active_tab = audio_tab
+
+        with patch("engine.gui.app.time.perf_counter", side_effect=[100.0, 165.0]):
+            audio_tab.prepare_for_download()
+            self.assertEqual(audio_tab.elapsed_label.text(), "Общее время выполнения: 00:00")
+
+            window._download_finished(0)
+
+        self.assertEqual(audio_tab.elapsed_label.text(), "Общее время выполнения: 01:05")
+        self.assertIsNone(audio_tab.started_at)
 
     def test_request_cancel_requires_confirmation(self):
         window = MainWindow()
@@ -142,6 +158,22 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(audio_tab.download_button.isEnabled())
         self.assertFalse(audio_tab.cancel_button.isEnabled())
         self.assertEqual(audio_tab.status_label.text(), "Отменено")
+        self.assertTrue(audio_tab.show_output_button.isHidden())
+
+    def test_show_output_button_opens_selected_directory(self):
+        window = MainWindow()
+        tabs = window.findChild(QTabWidget)
+        audio_tab = tabs.widget(1)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audio_tab.output_dir_input.setText(temp_dir)
+
+            with patch("engine.gui.app.QDesktopServices.openUrl") as open_url:
+                audio_tab.open_output_dir()
+
+            url = open_url.call_args.args[0]
+
+        self.assertEqual(Path(url.toLocalFile()), Path(temp_dir).resolve())
 
     def test_confirm_overwrite_dialog_resolves_request(self):
         window = MainWindow()
