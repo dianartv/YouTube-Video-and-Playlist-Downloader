@@ -5,6 +5,8 @@ from pathlib import Path
 
 import imageio_ffmpeg
 
+from engine.service.cancellation import CancellationToken, OperationCancelled
+
 
 class AudioConversionError(RuntimeError):
     pass
@@ -52,11 +54,14 @@ def convert_to_mp3(
     source_bitrate_kbps: int | None,
     max_bitrate_kbps: int = 320,
     ffmpeg_path: str = "ffmpeg",
+    cancel_token: CancellationToken | None = None,
 ) -> Path:
     input_path = Path(input_path)
     output_path = Path(output_path)
     if not input_path.exists():
         raise FileNotFoundError(input_path)
+    if cancel_token is not None:
+        cancel_token.raise_if_cancelled()
 
     bitrate = choose_mp3_bitrate(
         source_bitrate_kbps=source_bitrate_kbps,
@@ -76,12 +81,60 @@ def convert_to_mp3(
         f"{bitrate}k",
         str(output_path),
     ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-    )
+    if cancel_token is not None:
+        return _run_cancellable_ffmpeg(command, output_path, cancel_token)
+
+    result = subprocess.run(command, capture_output=True)
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace").strip()
         raise AudioConversionError(stderr or "FFmpeg failed")
 
     return output_path
+
+
+def _run_cancellable_ffmpeg(
+    command: list[str],
+    output_path: Path,
+    cancel_token: CancellationToken,
+) -> Path:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    cancel_token.register_process(process)
+    try:
+        while process.poll() is None:
+            if cancel_token.is_cancelled():
+                _terminate_process(process)
+                raise OperationCancelled("Конвертация MP3 отменена.")
+
+            try:
+                process.wait(timeout=0.1)
+            except subprocess.TimeoutExpired:
+                pass
+
+        stdout, stderr = process.communicate()
+    finally:
+        cancel_token.unregister_process(process)
+
+    if cancel_token.is_cancelled():
+        raise OperationCancelled("Конвертация MP3 отменена.")
+
+    if process.returncode != 0:
+        message = stderr.decode("utf-8", errors="replace").strip()
+        raise AudioConversionError(message or "FFmpeg failed")
+
+    return output_path
+
+
+def _terminate_process(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()

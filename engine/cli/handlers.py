@@ -5,9 +5,14 @@ from pytubefix.exceptions import LiveStreamEnded, LiveStreamError, VideoUnavaila
 from engine.application.download_audio import download_audio as run_audio_download
 from engine.application.download_playlist import download_playlist
 from engine.application.download_video import download_video as run_video_download
-from engine.cli.prompts import prompt_audio_stream, prompt_video_resolution
+from engine.cli.prompts import (
+    prompt_audio_stream,
+    prompt_overwrite_download,
+    prompt_video_resolution,
+)
 from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
 from engine.service.config import ensure_env_file, load_config
+from engine.service.download_history import SQLiteDownloadHistory
 from engine.service.logger import configure_file_logger, logger
 from engine.youtube_tools.youtube_tools import Playlist, YouTube
 
@@ -34,6 +39,7 @@ def download_media_interactive(
         return 1
 
     try:
+        download_history = SQLiteDownloadHistory.default()
         video = YouTube(url=video_url)
         print_func(f"Видео: {video.title}")
         if mode == AUDIO_MODE:
@@ -43,6 +49,13 @@ def download_media_interactive(
                 input_func=input_func,
                 print_func=print_func,
                 prompt_audio_stream_func=prompt_audio_stream,
+                download_history=download_history,
+                confirm_overwrite_func=lambda existing, planned: prompt_overwrite_download(
+                    existing,
+                    planned,
+                    input_func,
+                    print_func,
+                ),
             )
 
         return run_video_download(
@@ -52,6 +65,13 @@ def download_media_interactive(
             print_func=print_func,
             prompt_video_resolution_func=prompt_video_resolution,
             prompt_audio_stream_func=prompt_audio_stream,
+            download_history=download_history,
+            confirm_overwrite_func=lambda existing, planned: prompt_overwrite_download(
+                existing,
+                planned,
+                input_func,
+                print_func,
+            ),
         )
     except LiveStreamError:
         logger.warning(f"Трансляция {video_url} ещё идёт.")
@@ -84,6 +104,7 @@ def download_playlist_interactive(
         print_func("Ссылка не указана.")
         return 1
 
+    download_history = SQLiteDownloadHistory.default()
     playlist = Playlist(playlist_url)
     return download_playlist(
         playlist=playlist,
@@ -93,6 +114,13 @@ def download_playlist_interactive(
         print_func=print_func,
         prompt_video_resolution_func=prompt_video_resolution,
         prompt_audio_stream_func=prompt_audio_stream,
+        download_history=download_history,
+        confirm_overwrite_func=lambda existing, planned: prompt_overwrite_download(
+            existing,
+            planned,
+            input_func,
+            print_func,
+        ),
     )
 
 

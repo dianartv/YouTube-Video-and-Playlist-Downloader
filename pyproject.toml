@@ -6,5 +6,6 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "imageio-ffmpeg==0.6.0",
+    "pyside6>=6.11.1",
     "pytubefix==10.10.1",
 ]

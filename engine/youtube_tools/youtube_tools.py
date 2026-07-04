@@ -73,11 +73,19 @@ class DownloadYTAudio:
     def __init__(self, video: YouTube) -> None:
         self.video = video
 
-    def download(self, stream, save_to: str, filename: str | None = None) -> str:
+    def download(
+        self,
+        stream,
+        save_to: str,
+        filename: str | None = None,
+        interrupt_checker=None,
+    ) -> str | None:
         """Загрузка выбранного audio-only stream."""
         kwargs = {"output_path": save_to}
         if filename is not None:
             kwargs["filename"] = filename
+        if interrupt_checker is not None:
+            kwargs["interrupt_checker"] = interrupt_checker
 
         return stream.download(**kwargs)
 

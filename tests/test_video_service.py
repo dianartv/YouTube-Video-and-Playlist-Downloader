@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from engine.service.cancellation import CancellationToken, OperationCancelled
 from engine.service.video import VideoMergeError, merge_video_and_audio_to_mp4
 
 
@@ -114,6 +115,32 @@ class VideoServiceTests(unittest.TestCase):
                     source_audio_bitrate_kbps=160,
                     max_audio_bitrate_kbps=320,
                 )
+
+    def test_merge_video_and_audio_to_mp4_does_not_start_ffmpeg_when_cancelled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            video_path = temp_path / "video.mp4"
+            audio_path = temp_path / "audio.webm"
+            output_path = temp_path / "output.mp4"
+            video_path.write_bytes(b"video")
+            audio_path.write_bytes(b"audio")
+            token = CancellationToken()
+            token.cancel()
+
+            with (
+                patch("engine.service.video.subprocess.Popen") as popen,
+                self.assertRaises(OperationCancelled),
+            ):
+                merge_video_and_audio_to_mp4(
+                    video_path=video_path,
+                    audio_path=audio_path,
+                    output_path=output_path,
+                    source_audio_bitrate_kbps=160,
+                    max_audio_bitrate_kbps=320,
+                    cancel_token=token,
+                )
+
+        popen.assert_not_called()
 
 
 if __name__ == "__main__":

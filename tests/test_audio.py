@@ -10,6 +10,7 @@ from engine.service.audio import (
     convert_to_mp3,
     parse_bitrate_kbps,
 )
+from engine.service.cancellation import CancellationToken, OperationCancelled
 
 
 class AudioServiceTests(unittest.TestCase):
@@ -107,6 +108,28 @@ class AudioServiceTests(unittest.TestCase):
                     )
 
         self.assertIn("bad byte:", str(exc.exception))
+
+    def test_convert_to_mp3_does_not_start_ffmpeg_when_cancelled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "audio.webm"
+            output_path = Path(temp_dir) / "audio.mp3"
+            input_path.write_bytes(b"fake audio")
+            token = CancellationToken()
+            token.cancel()
+
+            with (
+                patch("engine.service.audio.subprocess.Popen") as popen,
+                self.assertRaises(OperationCancelled),
+            ):
+                convert_to_mp3(
+                    input_path=input_path,
+                    output_path=output_path,
+                    source_bitrate_kbps=160,
+                    max_bitrate_kbps=320,
+                    cancel_token=token,
+                )
+
+        popen.assert_not_called()
 
 
 if __name__ == "__main__":

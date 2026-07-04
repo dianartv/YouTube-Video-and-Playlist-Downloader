@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ from engine.application.download_video import download_video
 from engine.cli.prompts import prompt_audio_stream, prompt_video_resolution
 from engine.domain.naming import make_playlist_directory_name
 from engine.domain.selection import choose_audio_stream, choose_video_resolution
+from engine.domain.download_history import DownloadRecord
 from engine.service.config import AppConfig
 from engine.cli.handlers import (
     download_media_interactive,
@@ -24,7 +26,10 @@ class FakeAudioStream:
         self.subtype = subtype
         self.saved_to = None
 
-    def download(self, output_path=None, filename=None):
+    def download(self, output_path=None, filename=None, interrupt_checker=None):
+        if interrupt_checker is not None and interrupt_checker():
+            return None
+
         self.saved_to = Path(output_path) / filename
         return str(self.saved_to)
 
@@ -37,9 +42,23 @@ class FakeVideoStream:
         self.fps = fps
         self.saved_to = None
 
-    def download(self, output_path=None, filename=None):
+    def download(self, output_path=None, filename=None, interrupt_checker=None):
+        if interrupt_checker is not None and interrupt_checker():
+            return None
+
         self.saved_to = Path(output_path) / filename
         return str(self.saved_to)
+
+
+class InMemoryDownloadHistory:
+    def __init__(self, records=None):
+        self.records = records or {}
+
+    def find(self, video_id: str, media_type: str):
+        return self.records.get((video_id, media_type))
+
+    def upsert(self, record: DownloadRecord) -> None:
+        self.records[(record.video_id, record.media_type)] = record
 
 
 class ChooseVideoResolutionTests(unittest.TestCase):
@@ -207,12 +226,192 @@ class FullAutoDownloadTests(unittest.TestCase):
         downloader.return_value.download.assert_called_once_with(
             stream=stream,
             save_to=str(Path("content/audio")),
+            interrupt_checker=None,
         )
         convert.assert_called_once()
         self.assertIn(
             "Full auto: выбрана лучшая аудио-дорожка 160kbps webm (itag 251, mp3 160kbps).",
             output,
         )
+
+    def test_audio_duplicate_existing_file_requires_overwrite_confirmation(self):
+        output = []
+        stream = FakeAudioStream(251, "160kbps", "webm")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            existing_path = temp_path / "Title.mp3"
+            existing_path.write_bytes(b"existing")
+            history = InMemoryDownloadHistory(
+                {
+                    ("abc123", "audio"): DownloadRecord(
+                        video_id="abc123",
+                        media_type="audio",
+                        title="Title",
+                        output_path=existing_path,
+                        source_url="https://youtu.be/abc123",
+                        audio_bitrate=160,
+                        audio_itag=251,
+                        output_bitrate=160,
+                        container="mp3",
+                        downloaded_at="2026-07-04T12:00:00+00:00",
+                    )
+                }
+            )
+            config = SimpleNamespace(
+                full_auto=True,
+                audio_download_dir=temp_path,
+                default_mp3_bitrate=320,
+                ffmpeg_path="ffmpeg",
+            )
+            confirm_calls = []
+
+            with (
+                patch(
+                    "engine.application.download_audio.get_audio_streams",
+                    return_value=[stream],
+                ),
+                patch("engine.application.download_audio.DownloadYTAudio") as downloader,
+            ):
+                result = download_audio(
+                    video=SimpleNamespace(
+                        title="Title",
+                        video_id="abc123",
+                        watch_url="https://youtu.be/abc123",
+                    ),
+                    config=config,
+                    input_func=lambda prompt: self.fail("input should not be called"),
+                    print_func=output.append,
+                    prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
+                    download_history=history,
+                    confirm_overwrite_func=lambda existing, planned: confirm_calls.append(
+                        (existing, planned)
+                    )
+                    or False,
+                )
+
+        self.assertEqual(result, 0)
+        downloader.assert_not_called()
+        self.assertEqual(len(confirm_calls), 1)
+        self.assertTrue(
+            any("Качество в истории: audio 160kbps" in line for line in output)
+        )
+        self.assertIn("Пропущено: пользователь отказался от перезаписи.", output)
+
+    def test_audio_stale_history_record_downloads_without_confirmation(self):
+        output = []
+        stream = FakeAudioStream(251, "160kbps", "webm")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            history = InMemoryDownloadHistory(
+                {
+                    ("abc123", "audio"): DownloadRecord(
+                        video_id="abc123",
+                        media_type="audio",
+                        title="Title",
+                        output_path=temp_path / "missing.mp3",
+                        source_url="https://youtu.be/abc123",
+                        output_bitrate=160,
+                        container="mp3",
+                        downloaded_at="2026-07-04T12:00:00+00:00",
+                    )
+                }
+            )
+            config = SimpleNamespace(
+                full_auto=True,
+                audio_download_dir=temp_path,
+                default_mp3_bitrate=320,
+                ffmpeg_path="ffmpeg",
+            )
+
+            with (
+                patch(
+                    "engine.application.download_audio.get_audio_streams",
+                    return_value=[stream],
+                ),
+                patch("engine.application.download_audio.DownloadYTAudio") as downloader,
+                patch("engine.application.download_audio.convert_to_mp3") as convert,
+            ):
+                downloader.return_value.download.return_value = str(temp_path / "Title.webm")
+                convert.return_value = temp_path / "Title.mp3"
+                result = download_audio(
+                    video=SimpleNamespace(
+                        title="Title",
+                        video_id="abc123",
+                        watch_url="https://youtu.be/abc123",
+                    ),
+                    config=config,
+                    input_func=lambda prompt: self.fail("input should not be called"),
+                    print_func=output.append,
+                    prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
+                    download_history=history,
+                    confirm_overwrite_func=lambda *args: self.fail("confirm should not be called"),
+                )
+
+        self.assertEqual(result, 0)
+        downloader.return_value.download.assert_called_once()
+        self.assertIn(
+            "Запись о прошлой загрузке найдена, но конечного файла уже нет. Скачиваю заново.",
+            output,
+        )
+
+    def test_successful_video_download_records_quality(self):
+        output = []
+        video_stream = FakeVideoStream(137, "720p", "mp4")
+        audio_stream = FakeAudioStream(251, "160kbps", "webm")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            history = InMemoryDownloadHistory()
+            config = SimpleNamespace(
+                full_auto=True,
+                download_dir=temp_path,
+                default_video_quality=720,
+                default_mp3_bitrate=320,
+                ffmpeg_path="ffmpeg",
+            )
+
+            with (
+                patch(
+                    "engine.application.download_video.get_video_streams_no_higher_than",
+                    return_value=[video_stream],
+                ),
+                patch(
+                    "engine.application.download_video.get_video_resolutions_no_higher_than",
+                    return_value=[720],
+                ),
+                patch(
+                    "engine.application.download_video.get_audio_streams",
+                    return_value=[audio_stream],
+                ),
+                patch(
+                    "engine.application.download_video.merge_video_and_audio_to_mp4",
+                    return_value=temp_path / "Title.mp4",
+                ),
+            ):
+                result = download_video(
+                    video=SimpleNamespace(
+                        title="Title",
+                        video_id="abc123",
+                        length=100,
+                        watch_url="https://youtu.be/abc123",
+                    ),
+                    config=config,
+                    input_func=lambda prompt: self.fail("input should not be called"),
+                    print_func=output.append,
+                    prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
+                    prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
+                    download_history=history,
+                    confirm_overwrite_func=lambda *args: self.fail("confirm should not be called"),
+                )
+
+        record = history.find("abc123", "video")
+        self.assertEqual(result, 0)
+        self.assertIsNotNone(record)
+        self.assertEqual(record.video_resolution, 720)
+        self.assertEqual(record.video_itag, 137)
+        self.assertEqual(record.audio_bitrate, 160)
+        self.assertEqual(record.audio_itag, 251)
+        self.assertEqual(record.output_bitrate, 160)
+        self.assertEqual(record.container, "mp4")
 
 
 class DownloadMediaInteractiveTests(unittest.TestCase):
@@ -222,9 +421,15 @@ class DownloadMediaInteractiveTests(unittest.TestCase):
         with patch("engine.cli.handlers.YouTube") as youtube:
             video = youtube.return_value
             video.title = "Active live"
-            with patch(
-                "engine.cli.handlers.run_video_download",
-                side_effect=LiveStreamError("video-id"),
+            with (
+                patch(
+                    "engine.cli.handlers.SQLiteDownloadHistory.default",
+                    return_value=InMemoryDownloadHistory(),
+                ),
+                patch(
+                    "engine.cli.handlers.run_video_download",
+                    side_effect=LiveStreamError("video-id"),
+                ),
             ):
                 result = download_media_interactive(
                     mode="video",
@@ -244,9 +449,15 @@ class DownloadMediaInteractiveTests(unittest.TestCase):
         with patch("engine.cli.handlers.YouTube") as youtube:
             video = youtube.return_value
             video.title = "Ended live"
-            with patch(
-                "engine.cli.handlers.run_video_download",
-                side_effect=LiveStreamEnded("video-id", "ended"),
+            with (
+                patch(
+                    "engine.cli.handlers.SQLiteDownloadHistory.default",
+                    return_value=InMemoryDownloadHistory(),
+                ),
+                patch(
+                    "engine.cli.handlers.run_video_download",
+                    side_effect=LiveStreamEnded("video-id", "ended"),
+                ),
             ):
                 result = download_media_interactive(
                     mode="video",

@@ -27,6 +27,7 @@ uv run python main.py --video
 uv run python main.py --audio
 uv run python main.py --playlist --video
 uv run python main.py --playlist --audio
+uv run python gui_main.py
 ```
 
 Use `--video` to download the best video stream not higher than
@@ -35,6 +36,9 @@ them into an MP4 file with FFmpeg. Use `--audio` or `--audio-only` to download
 the best audio stream and convert it to MP3. Add `--playlist` to process every
 item from a YouTube playlist. The playlist directory name is taken from the
 YouTube playlist title automatically.
+
+`gui_main.py` starts the minimal PySide6 desktop UI. It keeps the CLI entrypoint
+unchanged and uses the same application use cases under the hood.
 
 Default values are stored in `.env`:
 
@@ -53,6 +57,12 @@ directories are ignored by Git.
 
 Playlist videos are written to `content/<playlist title>/`. Playlist audio MP3
 files are written to `content/audio/<playlist title>/`.
+
+Download history is stored in `content/.downloads.sqlite3`. If the same
+YouTube video is requested again for the same mode (`video` or `audio`) and the
+previous final file still exists, the app shows the saved quality and asks
+whether to overwrite. If the history entry exists but the final file was
+deleted, the app downloads normally and refreshes the history entry.
 
 Finished YouTube live broadcasts are downloaded like regular videos after
 YouTube publishes the archive streams. Active live streams are not downloaded;

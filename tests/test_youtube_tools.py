@@ -16,7 +16,10 @@ class FakeStream:
     def __init__(self):
         self.saved_to = None
 
-    def download(self, save_to=None, output_path=None, filename=None):
+    def download(self, save_to=None, output_path=None, filename=None, interrupt_checker=None):
+        if interrupt_checker is not None and interrupt_checker():
+            return None
+
         save_to = output_path or save_to
         self.saved_to = f"{save_to}/{filename}" if filename else save_to
         return f"{save_to}/{filename or 'audio.webm'}"
@@ -71,6 +74,19 @@ class DownloadYTAudioTests(unittest.TestCase):
 
         self.assertEqual(result, "content/audio/audio.webm")
         self.assertEqual(stream.saved_to, "content/audio")
+
+    def test_downloads_selected_audio_stream_can_be_interrupted(self):
+        video = object()
+        stream = FakeStream()
+
+        result = DownloadYTAudio(video).download(
+            stream=stream,
+            save_to="content/audio",
+            interrupt_checker=lambda: True,
+        )
+
+        self.assertIsNone(result)
+        self.assertIsNone(stream.saved_to)
 
     def test_downloads_selected_audio_stream_with_filename(self):
         video = object()

@@ -4,8 +4,10 @@ from pathlib import Path
 
 from pytubefix.exceptions import LiveStreamEnded, LiveStreamError, VideoUnavailable
 
+from engine.application.download_duplicates import ConfirmOverwriteFunc
 from engine.application.download_audio import download_audio
 from engine.application.download_video import download_video
+from engine.domain.download_history import DownloadHistory
 from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
 from engine.domain.naming import DEFAULT_PLAYLIST_DIR_NAME, make_playlist_directory_name
 from engine.service.logger import logger
@@ -31,6 +33,8 @@ def download_playlist(
     print_func: PrintFunc,
     prompt_video_resolution_func: PromptVideoResolutionFunc,
     prompt_audio_stream_func: PromptAudioStreamFunc,
+    download_history: DownloadHistory | None = None,
+    confirm_overwrite_func: ConfirmOverwriteFunc | None = None,
 ) -> int:
     if media_mode not in {VIDEO_MODE, AUDIO_MODE}:
         raise ValueError("media_mode must be video or audio")
@@ -68,6 +72,8 @@ def download_playlist(
                     input_func=input_func,
                     print_func=print_func,
                     prompt_audio_stream_func=prompt_audio_stream_func,
+                    download_history=download_history,
+                    confirm_overwrite_func=confirm_overwrite_func,
                 )
             else:
                 result = download_video(
@@ -77,6 +83,8 @@ def download_playlist(
                     print_func=print_func,
                     prompt_video_resolution_func=prompt_video_resolution_func,
                     prompt_audio_stream_func=prompt_audio_stream_func,
+                    download_history=download_history,
+                    confirm_overwrite_func=confirm_overwrite_func,
                 )
         except LiveStreamError:
             logger.warning(f"Трансляция {video_url} ещё идёт.")

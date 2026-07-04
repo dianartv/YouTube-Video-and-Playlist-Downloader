@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
 from engine.application.formatters import describe_mp3_audio_stream
+from engine.domain.download_history import DownloadRecord
 from engine.domain.selection import choose_audio_stream, choose_video_resolution
 
 
@@ -66,3 +67,13 @@ def prompt_audio_stream(
             )
         except ValueError as exc:
             print_func(str(exc))
+
+
+def prompt_overwrite_download(
+    existing_record: DownloadRecord,
+    planned_record: DownloadRecord,
+    input_func: InputFunc = input,
+    print_func: PrintFunc = print,
+) -> bool:
+    answer = input_func("Файл уже существует. Перезаписать? [y/N]: ").strip().lower()
+    return answer in {"y", "yes", "д", "да"}
