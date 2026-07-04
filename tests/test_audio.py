@@ -131,6 +131,48 @@ class AudioServiceTests(unittest.TestCase):
 
         popen.assert_not_called()
 
+    def test_convert_to_mp3_cancellable_drains_ffmpeg_output_while_waiting(self):
+        class FakeProcess:
+            def __init__(self):
+                self.returncode = 0
+                self.communicate_calls = 0
+
+            def communicate(self, timeout=None):
+                self.communicate_calls += 1
+                if self.communicate_calls == 1:
+                    raise subprocess.TimeoutExpired("ffmpeg", timeout)
+
+                return b"", b""
+
+            def poll(self):
+                return self.returncode
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "audio.webm"
+            output_path = Path(temp_dir) / "audio.mp3"
+            input_path.write_bytes(b"fake audio")
+            fake_process = FakeProcess()
+
+            with (
+                patch(
+                    "engine.service.audio.resolve_ffmpeg_executable",
+                    return_value="ffmpeg",
+                ),
+                patch("engine.service.audio.subprocess.Popen", return_value=fake_process),
+            ):
+                self.assertEqual(
+                    convert_to_mp3(
+                        input_path=input_path,
+                        output_path=output_path,
+                        source_bitrate_kbps=160,
+                        max_bitrate_kbps=320,
+                        cancel_token=CancellationToken(),
+                    ),
+                    output_path,
+                )
+
+        self.assertEqual(fake_process.communicate_calls, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

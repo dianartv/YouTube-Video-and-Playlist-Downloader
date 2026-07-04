@@ -1,5 +1,7 @@
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
+from typing import ContextManager
 
 from engine.application.download_duplicates import (
     ConfirmOverwriteFunc,
@@ -35,6 +37,7 @@ def download_audio(
     cancel_token: CancellationToken | None = None,
     download_history: DownloadHistory | None = None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None = None,
+    processing_limiter: ContextManager | None = None,
 ) -> int:
     if cancel_token is not None:
         cancel_token.raise_if_cancelled()
@@ -65,10 +68,9 @@ def download_audio(
     if cancel_token is not None:
         cancel_token.raise_if_cancelled()
 
-    expected_source_path = _expected_stream_path(stream, save_to)
-    planned_mp3_path = (
-        expected_source_path or _fallback_source_path(video, stream, save_to)
-    ).with_suffix(".mp3")
+    source_filename = _source_filename(video, stream)
+    expected_source_path = save_to / source_filename
+    planned_mp3_path = expected_source_path.with_suffix(".mp3")
     source_bitrate = parse_bitrate_kbps(getattr(stream, "abr", None))
     target_bitrate = choose_mp3_bitrate(source_bitrate, config.default_mp3_bitrate)
     planned_record = _build_audio_download_record(
@@ -93,6 +95,7 @@ def download_audio(
     downloaded = DownloadYTAudio(video=video).download(
         stream=stream,
         save_to=str(save_to),
+        filename=source_filename,
         interrupt_checker=cancel_token.is_cancelled if cancel_token is not None else None,
     )
     if downloaded is None:
@@ -109,14 +112,17 @@ def download_audio(
 
     try:
         print_func("Конвертирую аудио в MP3.")
-        convert_to_mp3(
-            input_path=downloaded_path,
-            output_path=mp3_path,
-            source_bitrate_kbps=source_bitrate,
-            max_bitrate_kbps=config.default_mp3_bitrate,
-            ffmpeg_path=config.ffmpeg_path,
-            cancel_token=cancel_token,
-        )
+        with processing_limiter or nullcontext():
+            if cancel_token is not None:
+                cancel_token.raise_if_cancelled()
+            convert_to_mp3(
+                input_path=downloaded_path,
+                output_path=mp3_path,
+                source_bitrate_kbps=source_bitrate,
+                max_bitrate_kbps=config.default_mp3_bitrate,
+                ffmpeg_path=config.ffmpeg_path,
+                cancel_token=cancel_token,
+            )
     except AudioConversionError as exc:
         logger.warning(f"Не удалось сконвертировать аудио в MP3: {exc}")
         print_func(f"Аудио скачано, но MP3-конвертация не выполнена: {exc}")
@@ -134,17 +140,23 @@ def download_audio(
     return 0
 
 
-def _expected_stream_path(stream, save_to: Path) -> Path | None:
-    get_file_path = getattr(stream, "get_file_path", None)
-    if get_file_path is None:
-        return None
-
-    return Path(get_file_path(output_path=str(save_to)))
+def _source_filename(video: YouTube, stream) -> str:
+    return f"{make_video_file_stem(getattr(video, 'title', None))}.{_audio_source_extension(stream)}"
 
 
-def _fallback_source_path(video: YouTube, stream, save_to: Path) -> Path:
-    subtype = getattr(stream, "subtype", None) or "bin"
-    return save_to / f"{make_video_file_stem(getattr(video, 'title', None))}.{subtype}"
+def _audio_source_extension(stream) -> str:
+    mime_type = str(getattr(stream, "mime_type", "") or "").lower()
+    if "/" in mime_type:
+        subtype = mime_type.split("/", 1)[1].split(";", 1)[0].strip()
+        if subtype == "mp4":
+            return "m4a"
+        if subtype:
+            return subtype
+
+    subtype = str(getattr(stream, "subtype", "") or "").lower()
+    if subtype == "mp4":
+        return "m4a"
+    return subtype or "bin"
 
 
 def _build_audio_download_record(

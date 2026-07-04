@@ -104,17 +104,16 @@ def _run_cancellable_ffmpeg(
     )
     cancel_token.register_process(process)
     try:
-        while process.poll() is None:
+        while True:
             if cancel_token.is_cancelled():
                 _terminate_process(process)
                 raise OperationCancelled("Конвертация MP3 отменена.")
 
             try:
-                process.wait(timeout=0.1)
+                stdout, stderr = process.communicate(timeout=0.1)
+                break
             except subprocess.TimeoutExpired:
                 pass
-
-        stdout, stderr = process.communicate()
     finally:
         cancel_token.unregister_process(process)
 

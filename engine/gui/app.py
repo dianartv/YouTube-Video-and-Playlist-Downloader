@@ -30,7 +30,7 @@ from engine.service.config import (
     PROJECT_ROOT,
     ensure_env_file,
     load_config,
-    save_worker_limit,
+    save_parallel_limits,
 )
 from engine.gui.workers import DownloadWorker
 
@@ -457,18 +457,21 @@ class SettingsTab(QWidget):
         super().__init__()
         self.parent_window = parent_window
 
-        self.worker_limit_select = QComboBox()
-        for value in range(MIN_WORKER_LIMIT, MAX_WORKER_LIMIT + 1):
-            self.worker_limit_select.addItem(str(value), value)
+        self.group_title = QLabel("Параллельная обработка")
+        self.group_title.setStyleSheet("font-weight: 700;")
 
-        index = max(
-            0,
-            min(
-                self.worker_limit_select.count() - 1,
-                int(config.worker_limit) - MIN_WORKER_LIMIT,
-            ),
+        self.download_worker_limit_select = QComboBox()
+        self.process_worker_limit_select = QComboBox()
+        for value in range(MIN_WORKER_LIMIT, MAX_WORKER_LIMIT + 1):
+            self.download_worker_limit_select.addItem(str(value), value)
+            self.process_worker_limit_select.addItem(str(value), value)
+
+        self.download_worker_limit_select.setCurrentIndex(
+            self._select_index(config.download_worker_limit),
         )
-        self.worker_limit_select.setCurrentIndex(index)
+        self.process_worker_limit_select.setCurrentIndex(
+            self._select_index(config.process_worker_limit),
+        )
 
         self.save_button = QPushButton("Сохранить")
         self.save_button.clicked.connect(self.save_settings)
@@ -484,8 +487,11 @@ class SettingsTab(QWidget):
         form = QGridLayout()
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(10)
-        form.addWidget(QLabel("Лимит потоков"), 0, 0)
-        form.addWidget(self.worker_limit_select, 0, 1)
+        form.addWidget(self.group_title, 0, 0, 1, 2)
+        form.addWidget(QLabel("Лимит для скачивания"), 1, 0)
+        form.addWidget(self.download_worker_limit_select, 1, 1)
+        form.addWidget(QLabel("Лимит для одновременной обработки"), 2, 0)
+        form.addWidget(self.process_worker_limit_select, 2, 1)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(10)
@@ -496,13 +502,28 @@ class SettingsTab(QWidget):
         root.addLayout(buttons)
         root.addStretch(1)
 
-    def worker_limit_value(self) -> int:
-        return int(self.worker_limit_select.currentData())
+    def download_worker_limit_value(self) -> int:
+        return int(self.download_worker_limit_select.currentData())
+
+    def process_worker_limit_value(self) -> int:
+        return int(self.process_worker_limit_select.currentData())
 
     def save_settings(self) -> None:
-        save_worker_limit(self.worker_limit_value())
+        save_parallel_limits(
+            self.download_worker_limit_value(),
+            self.process_worker_limit_value(),
+        )
         self.parent_window.config = load_config()
         self.status_label.setText("Сохранено")
+
+    def _select_index(self, value: int) -> int:
+        return max(
+            0,
+            min(
+                self.download_worker_limit_select.count() - 1,
+                int(value) - MIN_WORKER_LIMIT,
+            ),
+        )
 
 
 def run() -> int:

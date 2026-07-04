@@ -8,14 +8,16 @@ DEFAULT_VIDEO_QUALITY = 720
 DEFAULT_MP3_BITRATE = 320
 DEFAULT_FFMPEG_PATH = "ffmpeg"
 DEFAULT_FULL_AUTO = True
-DEFAULT_WORKER_LIMIT = 4
+DEFAULT_DOWNLOAD_WORKER_LIMIT = 4
+DEFAULT_PROCESS_WORKER_LIMIT = 4
+DEFAULT_WORKER_LIMIT = DEFAULT_DOWNLOAD_WORKER_LIMIT
 MIN_WORKER_LIMIT = 1
 MAX_WORKER_LIMIT = 8
 DEFAULT_ENV_PATH = Path(".env")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class AppConfig:
     download_dir: Path
     audio_download_dir: Path
@@ -23,7 +25,54 @@ class AppConfig:
     default_mp3_bitrate: int
     ffmpeg_path: str
     full_auto: bool
-    worker_limit: int
+    download_worker_limit: int
+    process_worker_limit: int
+
+    def __init__(
+        self,
+        *,
+        download_dir: Path,
+        audio_download_dir: Path,
+        default_video_quality: int,
+        default_mp3_bitrate: int,
+        ffmpeg_path: str,
+        full_auto: bool,
+        download_worker_limit: int | None = None,
+        process_worker_limit: int | None = None,
+        worker_limit: int | None = None,
+    ) -> None:
+        if worker_limit is not None:
+            if download_worker_limit is None:
+                download_worker_limit = worker_limit
+            if process_worker_limit is None:
+                process_worker_limit = worker_limit
+
+        object.__setattr__(self, "download_dir", download_dir)
+        object.__setattr__(self, "audio_download_dir", audio_download_dir)
+        object.__setattr__(self, "default_video_quality", default_video_quality)
+        object.__setattr__(self, "default_mp3_bitrate", default_mp3_bitrate)
+        object.__setattr__(self, "ffmpeg_path", ffmpeg_path)
+        object.__setattr__(self, "full_auto", full_auto)
+        object.__setattr__(
+            self,
+            "download_worker_limit",
+            _validate_worker_limit(
+                DEFAULT_DOWNLOAD_WORKER_LIMIT if download_worker_limit is None else download_worker_limit,
+                "DOWNLOAD_WORKER_LIMIT",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "process_worker_limit",
+            _validate_worker_limit(
+                DEFAULT_PROCESS_WORKER_LIMIT if process_worker_limit is None else process_worker_limit,
+                "PROCESS_WORKER_LIMIT",
+            ),
+        )
+
+    @property
+    def worker_limit(self) -> int:
+        return self.download_worker_limit
 
 
 def ensure_env_file(path: Path = DEFAULT_ENV_PATH) -> None:
@@ -39,7 +88,8 @@ def ensure_env_file(path: Path = DEFAULT_ENV_PATH) -> None:
                 f"DEFAULT_MP3_BITRATE={DEFAULT_MP3_BITRATE}",
                 f"FFMPEG_PATH={DEFAULT_FFMPEG_PATH}",
                 f"FULL_AUTO={int(DEFAULT_FULL_AUTO)}",
-                f"WORKER_LIMIT={DEFAULT_WORKER_LIMIT}",
+                f"DOWNLOAD_WORKER_LIMIT={DEFAULT_DOWNLOAD_WORKER_LIMIT}",
+                f"PROCESS_WORKER_LIMIT={DEFAULT_PROCESS_WORKER_LIMIT}",
                 "",
             ]
         ),
@@ -55,9 +105,17 @@ def load_config(path: Path = DEFAULT_ENV_PATH) -> AppConfig:
         "DEFAULT_MP3_BITRATE": str(DEFAULT_MP3_BITRATE),
         "FFMPEG_PATH": DEFAULT_FFMPEG_PATH,
         "FULL_AUTO": str(int(DEFAULT_FULL_AUTO)),
-        "WORKER_LIMIT": str(DEFAULT_WORKER_LIMIT),
+        "DOWNLOAD_WORKER_LIMIT": str(DEFAULT_DOWNLOAD_WORKER_LIMIT),
+        "PROCESS_WORKER_LIMIT": str(DEFAULT_PROCESS_WORKER_LIMIT),
     }
-    values.update(_read_env_file(path))
+    env_values = _read_env_file(path)
+    values.update(env_values)
+    legacy_worker_limit = env_values.get("WORKER_LIMIT")
+    if legacy_worker_limit is not None:
+        if "DOWNLOAD_WORKER_LIMIT" not in env_values:
+            values["DOWNLOAD_WORKER_LIMIT"] = legacy_worker_limit
+        if "PROCESS_WORKER_LIMIT" not in env_values:
+            values["PROCESS_WORKER_LIMIT"] = legacy_worker_limit
 
     try:
         default_video_quality = int(values["DEFAULT_VIDEO_QUALITY"])
@@ -75,7 +133,14 @@ def load_config(path: Path = DEFAULT_ENV_PATH) -> AppConfig:
     if default_mp3_bitrate <= 0:
         raise ValueError("DEFAULT_MP3_BITRATE must be greater than zero")
 
-    worker_limit = _parse_worker_limit(values["WORKER_LIMIT"])
+    download_worker_limit = _parse_worker_limit(
+        values["DOWNLOAD_WORKER_LIMIT"],
+        "DOWNLOAD_WORKER_LIMIT",
+    )
+    process_worker_limit = _parse_worker_limit(
+        values["PROCESS_WORKER_LIMIT"],
+        "PROCESS_WORKER_LIMIT",
+    )
 
     return AppConfig(
         download_dir=_resolve_download_dir(values["DOWNLOAD_DIR"]),
@@ -84,32 +149,55 @@ def load_config(path: Path = DEFAULT_ENV_PATH) -> AppConfig:
         default_mp3_bitrate=default_mp3_bitrate,
         ffmpeg_path=values["FFMPEG_PATH"].strip() or DEFAULT_FFMPEG_PATH,
         full_auto=_parse_bool(values["FULL_AUTO"]),
-        worker_limit=worker_limit,
+        download_worker_limit=download_worker_limit,
+        process_worker_limit=process_worker_limit,
     )
 
 
 def save_worker_limit(value: int, path: Path = DEFAULT_ENV_PATH) -> None:
-    worker_limit = _validate_worker_limit(value)
+    save_parallel_limits(value, value, path)
+
+
+def save_parallel_limits(
+    download_worker_limit: int,
+    process_worker_limit: int,
+    path: Path = DEFAULT_ENV_PATH,
+) -> None:
+    download_limit = _validate_worker_limit(download_worker_limit, "DOWNLOAD_WORKER_LIMIT")
+    process_limit = _validate_worker_limit(process_worker_limit, "PROCESS_WORKER_LIMIT")
     if not path.exists():
         ensure_env_file(path)
 
     lines = path.read_text(encoding="utf-8").splitlines()
-    updated = False
-    for index, line in enumerate(lines):
+    values = {
+        "DOWNLOAD_WORKER_LIMIT": str(download_limit),
+        "PROCESS_WORKER_LIMIT": str(process_limit),
+    }
+    updated_keys: set[str] = set()
+    new_lines: list[str] = []
+    for line in lines:
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
+            new_lines.append(line)
             continue
 
         key, _ = stripped.split("=", 1)
-        if key.strip() == "WORKER_LIMIT":
-            lines[index] = f"WORKER_LIMIT={worker_limit}"
-            updated = True
-            break
+        normalized_key = key.strip()
+        if normalized_key == "WORKER_LIMIT":
+            continue
 
-    if not updated:
-        lines.append(f"WORKER_LIMIT={worker_limit}")
+        if normalized_key in values:
+            new_lines.append(f"{normalized_key}={values[normalized_key]}")
+            updated_keys.add(normalized_key)
+            continue
 
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        new_lines.append(line)
+
+    for key, value in values.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={value}")
+
+    path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -162,15 +250,15 @@ def _parse_bool(raw_value: str) -> bool:
     raise ValueError("FULL_AUTO must be 1 or 0")
 
 
-def _parse_worker_limit(raw_value: str) -> int:
+def _parse_worker_limit(raw_value: str, key: str) -> int:
     try:
-        return _validate_worker_limit(int(raw_value))
+        return _validate_worker_limit(int(raw_value), key)
     except ValueError as exc:
-        raise ValueError("WORKER_LIMIT must be an integer from 1 to 8") from exc
+        raise ValueError(f"{key} must be an integer from 1 to 8") from exc
 
 
-def _validate_worker_limit(value: int) -> int:
+def _validate_worker_limit(value: int, key: str) -> int:
     if value < MIN_WORKER_LIMIT or value > MAX_WORKER_LIMIT:
-        raise ValueError("WORKER_LIMIT must be from 1 to 8")
+        raise ValueError(f"{key} must be from 1 to 8")
 
     return value

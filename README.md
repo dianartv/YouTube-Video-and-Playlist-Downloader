@@ -49,7 +49,8 @@ DEFAULT_VIDEO_QUALITY=720
 DEFAULT_MP3_BITRATE=320
 FFMPEG_PATH=ffmpeg
 FULL_AUTO=1
-WORKER_LIMIT=4
+DOWNLOAD_WORKER_LIMIT=4
+PROCESS_WORKER_LIMIT=4
 ```
 
 Downloaded videos are written to `content/`. Audio-only MP3 files are written
@@ -81,6 +82,9 @@ streams are transcoded to H.264 before saving the final MP4.
 `FULL_AUTO=1` keeps the interaction short: paste a link, choose video or audio,
 then the app downloads the best available MP4 video or best audio track.
 Set `FULL_AUTO=0` to choose video quality or audio stream manually.
+
+`DOWNLOAD_WORKER_LIMIT` limits simultaneous downloads in bulk-style flows.
+`PROCESS_WORKER_LIMIT` limits simultaneous FFmpeg processing tasks.
 
 ## Tests
 

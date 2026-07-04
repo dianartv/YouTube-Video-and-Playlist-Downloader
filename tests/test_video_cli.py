@@ -21,10 +21,11 @@ from engine.cli.handlers import (
 
 
 class FakeAudioStream:
-    def __init__(self, itag, abr, subtype="webm"):
+    def __init__(self, itag, abr, subtype="webm", mime_type=None):
         self.itag = itag
         self.abr = abr
         self.subtype = subtype
+        self.mime_type = mime_type
         self.saved_to = None
 
     def download(self, output_path=None, filename=None, interrupt_checker=None):
@@ -227,12 +228,52 @@ class FullAutoDownloadTests(unittest.TestCase):
         downloader.return_value.download.assert_called_once_with(
             stream=stream,
             save_to=str(Path("content/audio")),
+            filename="video.webm",
             interrupt_checker=None,
         )
         convert.assert_called_once()
         self.assertIn(
             "Full auto: выбрана лучшая аудио-дорожка 160kbps webm (itag 251, mp3 160kbps).",
             output,
+        )
+
+    def test_full_auto_audio_uses_source_extension_from_mime_type(self):
+        output = []
+        stream = FakeAudioStream(251, "160kbps", "webm", "audio/webm")
+        config = SimpleNamespace(
+            full_auto=True,
+            audio_download_dir=Path("content/audio"),
+            default_mp3_bitrate=320,
+            ffmpeg_path="ffmpeg",
+        )
+
+        with (
+            patch(
+                "engine.application.download_audio.get_audio_streams",
+                return_value=[stream],
+            ),
+            patch("engine.application.download_audio.DownloadYTAudio") as downloader,
+            patch("engine.application.download_audio.convert_to_mp3") as convert,
+        ):
+            downloader.return_value.download.return_value = "content/audio/Title.webm"
+            convert.return_value = Path("content/audio/Title.mp3")
+            result = download_audio(
+                video=SimpleNamespace(title="Title"),
+                config=config,
+                input_func=lambda prompt: self.fail("input should not be called"),
+                print_func=output.append,
+                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
+            )
+
+        self.assertEqual(result, 0)
+        downloader.return_value.download.assert_called_once_with(
+            stream=stream,
+            save_to=str(Path("content/audio")),
+            filename="Title.webm",
+            interrupt_checker=None,
+        )
+        self.assertTrue(
+            any("Скачиваю аудио-дорожку: 160kbps webm" in line for line in output)
         )
 
     def test_audio_duplicate_existing_file_requires_overwrite_confirmation(self):

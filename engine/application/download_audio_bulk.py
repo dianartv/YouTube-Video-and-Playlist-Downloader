@@ -1,6 +1,8 @@
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from threading import BoundedSemaphore
+from types import TracebackType
 
 from pytubefix.exceptions import LiveStreamEnded, LiveStreamError, VideoUnavailable
 
@@ -23,6 +25,32 @@ class BulkFailure:
     reason: str
 
 
+class ProcessingLimiter:
+    def __init__(
+        self,
+        *,
+        limit: int,
+        cancel_token: CancellationToken | None,
+    ) -> None:
+        self._semaphore = BoundedSemaphore(limit)
+        self._cancel_token = cancel_token
+
+    def __enter__(self) -> None:
+        while True:
+            if self._cancel_token is not None:
+                self._cancel_token.raise_if_cancelled()
+            if self._semaphore.acquire(timeout=0.2):
+                return None
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self._semaphore.release()
+
+
 def download_audio_bulk(
     *,
     urls: list[str],
@@ -39,12 +67,24 @@ def download_audio_bulk(
         print_func("Список ссылок пуст.")
         return 1
 
-    worker_limit = max(1, int(getattr(config, "worker_limit", 1)))
-    print_func(f"Список ссылок: {len(prepared_urls)}. Параллельных задач: {worker_limit}.")
+    download_worker_limit = max(
+        1,
+        int(getattr(config, "download_worker_limit", getattr(config, "worker_limit", 1))),
+    )
+    process_worker_limit = max(
+        1,
+        int(getattr(config, "process_worker_limit", getattr(config, "worker_limit", 1))),
+    )
+    print_func(
+        f"Список ссылок: {len(prepared_urls)}. "
+        f"Параллельных скачиваний: {download_worker_limit}. "
+        f"Одновременных обработок: {process_worker_limit}."
+    )
 
     success_count = 0
     failures: list[BulkFailure] = []
-    with ThreadPoolExecutor(max_workers=worker_limit) as executor:
+    processing_limiter = ProcessingLimiter(limit=process_worker_limit, cancel_token=cancel_token)
+    with ThreadPoolExecutor(max_workers=download_worker_limit) as executor:
         futures = {
             executor.submit(
                 _download_one,
@@ -58,6 +98,7 @@ def download_audio_bulk(
                 download_history=download_history,
                 confirm_overwrite_func=confirm_overwrite_func,
                 cancel_token=cancel_token,
+                processing_limiter=processing_limiter,
             ): (index, url)
             for index, url in enumerate(prepared_urls, start=1)
         }
@@ -108,6 +149,7 @@ def _download_one(
     download_history: DownloadHistory | None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None,
     cancel_token: CancellationToken | None,
+    processing_limiter: ProcessingLimiter,
 ) -> int:
     item_print = _prefixed_print(index, total, print_func)
     item_print(f"Ссылка: {url}")
@@ -128,6 +170,7 @@ def _download_one(
         cancel_token=cancel_token,
         download_history=download_history,
         confirm_overwrite_func=confirm_overwrite_func,
+        processing_limiter=processing_limiter,
     )
 
 

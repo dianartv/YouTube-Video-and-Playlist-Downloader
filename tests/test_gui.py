@@ -111,11 +111,12 @@ class GuiTests(unittest.TestCase):
         )
         self.assertEqual(worker_class.call_args.kwargs["mode"], AUDIO_MODE)
 
-    def test_settings_tab_saves_worker_limit(self):
+    def test_settings_tab_saves_parallel_limits(self):
         window = MainWindow()
         tabs = window.findChild(QTabWidget)
         settings_tab = tabs.widget(3)
-        settings_tab.worker_limit_select.setCurrentIndex(5)
+        settings_tab.download_worker_limit_select.setCurrentIndex(5)
+        settings_tab.process_worker_limit_select.setCurrentIndex(2)
         saved_config = AppConfig(
             download_dir=Path("content"),
             audio_download_dir=Path("content/audio"),
@@ -123,16 +124,17 @@ class GuiTests(unittest.TestCase):
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
             full_auto=True,
-            worker_limit=6,
+            download_worker_limit=6,
+            process_worker_limit=3,
         )
 
         with (
-            patch("engine.gui.app.save_worker_limit") as save_worker_limit,
+            patch("engine.gui.app.save_parallel_limits") as save_parallel_limits,
             patch("engine.gui.app.load_config", return_value=saved_config),
         ):
             settings_tab.save_settings()
 
-        save_worker_limit.assert_called_once_with(6)
+        save_parallel_limits.assert_called_once_with(6, 3)
         self.assertIs(window.config, saved_config)
         self.assertEqual(settings_tab.status_label.text(), "Сохранено")
 
@@ -317,7 +319,7 @@ class GuiTests(unittest.TestCase):
         download_playlist.assert_called_once()
         self.assertEqual(download_playlist.call_args.kwargs["media_mode"], AUDIO_MODE)
         self.assertEqual(download_playlist.call_args.kwargs["config"].audio_download_dir, output_dir)
-        self.assertEqual(download_playlist.call_args.kwargs["config"].worker_limit, 5)
+        self.assertEqual(download_playlist.call_args.kwargs["config"].download_worker_limit, 5)
         self.assertIs(download_playlist.call_args.kwargs["cancel_token"], worker.cancel_token)
 
     def test_audio_bulk_worker_routes_to_bulk_downloader(self):
@@ -352,6 +354,8 @@ class GuiTests(unittest.TestCase):
         download_audio_bulk.assert_called_once()
         self.assertEqual(download_audio_bulk.call_args.kwargs["urls"], ["one", "two"])
         self.assertEqual(download_audio_bulk.call_args.kwargs["config"].audio_download_dir, output_dir)
+        self.assertEqual(download_audio_bulk.call_args.kwargs["config"].download_worker_limit, 4)
+        self.assertEqual(download_audio_bulk.call_args.kwargs["config"].process_worker_limit, 4)
         self.assertIs(download_audio_bulk.call_args.kwargs["cancel_token"], worker.cancel_token)
 
 
