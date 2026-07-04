@@ -20,25 +20,17 @@ from engine.youtube_tools.youtube_tools import (
     YouTube,
     download_stream,
     get_audio_streams,
-    get_best_video_stream_for_resolution,
-    get_video_resolutions_no_higher_than,
     get_video_streams_no_higher_than,
 )
 
 
-InputFunc = Callable[[str], str]
 PrintFunc = Callable[[str], None]
-PromptVideoResolutionFunc = Callable[[list[int], int, list[int] | None, InputFunc, PrintFunc], int]
-PromptAudioStreamFunc = Callable[[list, int, InputFunc, PrintFunc], object]
 
 
 def download_video(
     video: YouTube,
     config,
-    input_func: InputFunc,
     print_func: PrintFunc,
-    prompt_video_resolution_func: PromptVideoResolutionFunc,
-    prompt_audio_stream_func: PromptAudioStreamFunc,
     cancel_token: CancellationToken | None = None,
     download_history: DownloadHistory | None = None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None = None,
@@ -66,36 +58,16 @@ def download_video(
     if cancel_token is not None:
         cancel_token.raise_if_cancelled()
 
-    available_resolutions = get_video_resolutions_no_higher_than(
-        video,
-        max_resolution=config.default_video_quality,
+    video_stream = video_streams[0]
+    audio_stream = audio_streams[0]
+    print_func(
+        "Выбрано лучшее видео "
+        f"не выше {config.default_video_quality}p: {describe_video_stream(video_stream)}."
     )
-    if config.full_auto:
-        video_stream = video_streams[0]
-        audio_stream = audio_streams[0]
-        print_func(
-            "Full auto: выбрано лучшее видео "
-            f"не выше {config.default_video_quality}p: {describe_video_stream(video_stream)}."
-        )
-        print_func(
-            "Full auto: выбрана лучшая аудио-дорожка: "
-            f"{describe_aac_audio_stream(audio_stream, config.default_mp3_bitrate)}."
-        )
-    else:
-        resolution = prompt_video_resolution_func(
-            available_resolutions,
-            config.default_video_quality,
-            None,
-            input_func,
-            print_func,
-        )
-        video_stream = get_best_video_stream_for_resolution(video_streams, resolution)
-        audio_stream = prompt_audio_stream_func(
-            audio_streams,
-            config.default_mp3_bitrate,
-            input_func,
-            print_func,
-        )
+    print_func(
+        "Выбрана лучшая аудио-дорожка: "
+        f"{describe_aac_audio_stream(audio_stream, config.default_mp3_bitrate)}."
+    )
 
     save_to = Path(config.download_dir)
     save_to.mkdir(parents=True, exist_ok=True)

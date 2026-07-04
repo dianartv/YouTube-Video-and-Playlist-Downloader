@@ -7,7 +7,6 @@ from engine.service.config import (
     DEFAULT_AUDIO_DOWNLOAD_DIR,
     DEFAULT_DOWNLOAD_WORKER_LIMIT,
     DEFAULT_FFMPEG_PATH,
-    DEFAULT_FULL_AUTO,
     DEFAULT_MP3_BITRATE,
     DEFAULT_PROCESS_WORKER_LIMIT,
     DEFAULT_VIDEO_QUALITY,
@@ -28,7 +27,6 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.default_video_quality, DEFAULT_VIDEO_QUALITY)
         self.assertEqual(config.default_mp3_bitrate, DEFAULT_MP3_BITRATE)
         self.assertEqual(config.ffmpeg_path, DEFAULT_FFMPEG_PATH)
-        self.assertEqual(config.full_auto, DEFAULT_FULL_AUTO)
         self.assertEqual(config.download_worker_limit, DEFAULT_DOWNLOAD_WORKER_LIMIT)
         self.assertEqual(config.process_worker_limit, DEFAULT_PROCESS_WORKER_LIMIT)
 
@@ -44,7 +42,6 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.default_video_quality, 720)
         self.assertEqual(config.default_mp3_bitrate, 320)
         self.assertEqual(config.ffmpeg_path, "ffmpeg")
-        self.assertTrue(config.full_auto)
         self.assertEqual(config.download_worker_limit, 4)
         self.assertEqual(config.process_worker_limit, 4)
 
@@ -59,7 +56,6 @@ class ConfigTests(unittest.TestCase):
                         "DEFAULT_VIDEO_QUALITY=1080",
                         "DEFAULT_MP3_BITRATE=192",
                         "FFMPEG_PATH=tools/ffmpeg.exe",
-                        "FULL_AUTO=0",
                         "DOWNLOAD_WORKER_LIMIT=7",
                         "PROCESS_WORKER_LIMIT=12",
                         "",
@@ -75,7 +71,6 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.default_video_quality, 1080)
         self.assertEqual(config.default_mp3_bitrate, 192)
         self.assertEqual(config.ffmpeg_path, "tools/ffmpeg.exe")
-        self.assertFalse(config.full_auto)
         self.assertEqual(config.download_worker_limit, 7)
         self.assertEqual(config.process_worker_limit, 12)
 
@@ -173,14 +168,6 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             env_path = Path(temp_dir) / ".env"
             env_path.write_text("DOWNLOAD_DIR content\n", encoding="utf-8")
-
-            with self.assertRaises(ValueError):
-                load_config(env_path)
-
-    def test_load_config_rejects_invalid_full_auto_value(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env_path = Path(temp_dir) / ".env"
-            env_path.write_text("FULL_AUTO=maybe\n", encoding="utf-8")
 
             with self.assertRaises(ValueError):
                 load_config(env_path)

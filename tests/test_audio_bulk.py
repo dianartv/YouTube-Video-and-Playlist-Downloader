@@ -26,9 +26,7 @@ class AudioBulkTests(unittest.TestCase):
             result = download_audio_bulk(
                 urls=["one", "bad", "two"],
                 config=config,
-                input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=output.append,
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         self.assertEqual(result, 1)
@@ -51,9 +49,7 @@ class AudioBulkTests(unittest.TestCase):
             result = download_audio_bulk(
                 urls=["one", "two"],
                 config=config,
-                input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=output.append,
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         self.assertEqual(result, 0)
@@ -89,9 +85,7 @@ class AudioBulkTests(unittest.TestCase):
             result = download_audio_bulk(
                 urls=["one", "two", "three"],
                 config=SimpleNamespace(download_worker_limit=3, process_worker_limit=1),
-                input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=output.append,
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         self.assertEqual(result, 0)
@@ -112,9 +106,7 @@ class AudioBulkTests(unittest.TestCase):
             download_audio_bulk(
                 urls=["one", "two"],
                 config=SimpleNamespace(worker_limit=2),
-                input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=lambda message: None,
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
                 cancel_token=token,
             )
 

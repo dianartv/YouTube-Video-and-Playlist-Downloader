@@ -7,7 +7,6 @@ DEFAULT_AUDIO_DOWNLOAD_DIR = "content/audio"
 DEFAULT_VIDEO_QUALITY = 720
 DEFAULT_MP3_BITRATE = 320
 DEFAULT_FFMPEG_PATH = "ffmpeg"
-DEFAULT_FULL_AUTO = True
 DEFAULT_DOWNLOAD_WORKER_LIMIT = 4
 DEFAULT_PROCESS_WORKER_LIMIT = 4
 DEFAULT_WORKER_LIMIT = DEFAULT_DOWNLOAD_WORKER_LIMIT
@@ -26,7 +25,6 @@ class AppConfig:
     default_video_quality: int
     default_mp3_bitrate: int
     ffmpeg_path: str
-    full_auto: bool
     download_worker_limit: int
     process_worker_limit: int
 
@@ -38,7 +36,6 @@ class AppConfig:
         default_video_quality: int,
         default_mp3_bitrate: int,
         ffmpeg_path: str,
-        full_auto: bool,
         download_worker_limit: int | None = None,
         process_worker_limit: int | None = None,
         worker_limit: int | None = None,
@@ -54,7 +51,6 @@ class AppConfig:
         object.__setattr__(self, "default_video_quality", default_video_quality)
         object.__setattr__(self, "default_mp3_bitrate", default_mp3_bitrate)
         object.__setattr__(self, "ffmpeg_path", ffmpeg_path)
-        object.__setattr__(self, "full_auto", full_auto)
         object.__setattr__(
             self,
             "download_worker_limit",
@@ -91,7 +87,6 @@ def ensure_env_file(path: Path = DEFAULT_ENV_PATH) -> None:
                 f"DEFAULT_VIDEO_QUALITY={DEFAULT_VIDEO_QUALITY}",
                 f"DEFAULT_MP3_BITRATE={DEFAULT_MP3_BITRATE}",
                 f"FFMPEG_PATH={DEFAULT_FFMPEG_PATH}",
-                f"FULL_AUTO={int(DEFAULT_FULL_AUTO)}",
                 f"DOWNLOAD_WORKER_LIMIT={DEFAULT_DOWNLOAD_WORKER_LIMIT}",
                 f"PROCESS_WORKER_LIMIT={DEFAULT_PROCESS_WORKER_LIMIT}",
                 "",
@@ -108,7 +103,6 @@ def load_config(path: Path = DEFAULT_ENV_PATH) -> AppConfig:
         "DEFAULT_VIDEO_QUALITY": str(DEFAULT_VIDEO_QUALITY),
         "DEFAULT_MP3_BITRATE": str(DEFAULT_MP3_BITRATE),
         "FFMPEG_PATH": DEFAULT_FFMPEG_PATH,
-        "FULL_AUTO": str(int(DEFAULT_FULL_AUTO)),
         "DOWNLOAD_WORKER_LIMIT": str(DEFAULT_DOWNLOAD_WORKER_LIMIT),
         "PROCESS_WORKER_LIMIT": str(DEFAULT_PROCESS_WORKER_LIMIT),
     }
@@ -152,7 +146,6 @@ def load_config(path: Path = DEFAULT_ENV_PATH) -> AppConfig:
         default_video_quality=default_video_quality,
         default_mp3_bitrate=default_mp3_bitrate,
         ffmpeg_path=values["FFMPEG_PATH"].strip() or DEFAULT_FFMPEG_PATH,
-        full_auto=_parse_bool(values["FULL_AUTO"]),
         download_worker_limit=download_worker_limit,
         process_worker_limit=process_worker_limit,
     )
@@ -249,17 +242,6 @@ def _resolve_download_dir(raw_value: str) -> Path:
         raise ValueError("DOWNLOAD_DIR must stay inside the project")
 
     return download_dir
-
-
-def _parse_bool(raw_value: str) -> bool:
-    value = raw_value.strip().lower()
-    if value in {"1", "true", "yes", "y", "on"}:
-        return True
-
-    if value in {"0", "false", "no", "n", "off"}:
-        return False
-
-    raise ValueError("FULL_AUTO must be 1 or 0")
 
 
 def _parse_worker_limit(raw_value: str, key: str) -> int:

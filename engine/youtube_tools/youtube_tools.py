@@ -169,16 +169,6 @@ def get_video_streams_no_higher_than(video: YouTube, max_resolution: int) -> lis
     )
 
 
-def get_video_resolutions_no_higher_than(video: YouTube, max_resolution: int) -> list[int]:
-    resolutions = []
-    for stream in get_video_streams_no_higher_than(video, max_resolution):
-        resolution = _stream_resolution_value(stream)
-        if resolution is not None and resolution not in resolutions:
-            resolutions.append(resolution)
-
-    return resolutions
-
-
 def get_best_video_stream_no_higher_than(video: YouTube, max_resolution: int):
     streams = get_video_streams_no_higher_than(video, max_resolution)
     if not streams:
@@ -187,20 +177,6 @@ def get_best_video_stream_no_higher_than(video: YouTube, max_resolution: int):
         )
 
     return streams[0]
-
-
-def get_best_video_stream_for_resolution(video_streams: list, resolution: int):
-    matching_streams = [
-        stream
-        for stream in video_streams
-        if _stream_resolution_value(stream) == resolution
-    ]
-    if not matching_streams:
-        raise ItagDoesNotExist(
-            f'У видео нет видеопотока для {resolution}p.'
-        )
-
-    return matching_streams[0]
 
 
 def get_audio_streams(video: YouTube) -> list:

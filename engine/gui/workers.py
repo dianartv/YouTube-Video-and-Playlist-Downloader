@@ -9,7 +9,6 @@ from engine.application.download_audio import download_audio
 from engine.application.download_audio_bulk import download_audio_bulk
 from engine.application.download_playlist import download_playlist
 from engine.application.download_video import download_video
-from engine.cli.prompts import prompt_audio_stream, prompt_video_resolution
 from engine.domain.download_history import DownloadRecord
 from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
 from engine.service.cancellation import CancellationToken, OperationCancelled
@@ -131,10 +130,7 @@ class DownloadWorker(QObject):
             return download_video(
                 video=video,
                 config=config,
-                input_func=_no_input,
                 print_func=self._print,
-                prompt_video_resolution_func=prompt_video_resolution,
-                prompt_audio_stream_func=prompt_audio_stream,
                 cancel_token=self.cancel_token,
                 download_history=download_history,
                 confirm_overwrite_func=self._confirm_overwrite,
@@ -145,9 +141,7 @@ class DownloadWorker(QObject):
             return download_audio(
                 video=video,
                 config=config,
-                input_func=_no_input,
                 print_func=self._print,
-                prompt_audio_stream_func=prompt_audio_stream,
                 cancel_token=self.cancel_token,
                 download_history=download_history,
                 confirm_overwrite_func=self._confirm_overwrite,
@@ -164,9 +158,7 @@ class DownloadWorker(QObject):
         return download_audio_bulk(
             urls=self.bulk_urls,
             config=config,
-            input_func=_no_input,
             print_func=self._print,
-            prompt_audio_stream_func=prompt_audio_stream,
             download_history=download_history,
             confirm_overwrite_func=self._confirm_overwrite,
             cancel_token=self.cancel_token,
@@ -180,10 +172,7 @@ class DownloadWorker(QObject):
             playlist=playlist,
             media_mode=self.mode,
             config=config,
-            input_func=_no_input,
             print_func=self._print,
-            prompt_video_resolution_func=prompt_video_resolution,
-            prompt_audio_stream_func=prompt_audio_stream,
             download_history=download_history,
             confirm_overwrite_func=self._confirm_overwrite,
             cancel_token=self.cancel_token,
@@ -209,13 +198,11 @@ class DownloadWorker(QObject):
                 config,
                 download_dir=self.output_dir,
                 default_video_quality=self.video_quality or config.default_video_quality,
-                full_auto=True,
             )
 
         return replace(
             config,
             audio_download_dir=self.output_dir,
-            full_auto=True,
         )
 
     def _print(self, message: str) -> None:
@@ -258,7 +245,3 @@ class DownloadWorker(QObject):
             self.status_message.emit("Готово")
             self.progress_busy.emit(False)
             self.progress_changed.emit(100)
-
-
-def _no_input(prompt: str) -> str:
-    raise RuntimeError("GUI mode does not support interactive prompts")

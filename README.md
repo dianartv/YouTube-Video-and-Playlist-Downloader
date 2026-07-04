@@ -19,26 +19,18 @@ uv sync
 
 ## Usage
 
-Run the downloader through `uv` with an explicit mode flag, then paste a
-YouTube URL.
+Run the desktop GUI through `uv`, then use the tabs for video, audio, playlist,
+or settings.
 
 ```powershell
-uv run python main.py --video
-uv run python main.py --audio
-uv run python main.py --playlist --video
-uv run python main.py --playlist --audio
-uv run python gui_main.py
+uv run python main.py
 ```
 
-Use `--video` to download the best video stream not higher than
-`DEFAULT_VIDEO_QUALITY`, download the best audio stream separately, and merge
-them into an MP4 file with FFmpeg. Use `--audio` or `--audio-only` to download
-the best audio stream and convert it to MP3. Add `--playlist` to process every
-item from a YouTube playlist. The playlist directory name is taken from the
-YouTube playlist title automatically.
-
-`gui_main.py` starts the minimal PySide6 desktop UI. It keeps the CLI entrypoint
-unchanged and uses the same application use cases under the hood.
+Video downloads use the best video stream not higher than the selected quality,
+download the best audio stream separately, and merge them into an MP4 file with
+FFmpeg. Audio downloads use the best audio stream and convert it to MP3.
+Playlist mode processes every item from a YouTube playlist. The playlist
+directory name is taken from the YouTube playlist title automatically.
 
 Default values are stored in `.env`:
 
@@ -48,7 +40,6 @@ AUDIO_DOWNLOAD_DIR=content/audio
 DEFAULT_VIDEO_QUALITY=720
 DEFAULT_MP3_BITRATE=320
 FFMPEG_PATH=ffmpeg
-FULL_AUTO=1
 DOWNLOAD_WORKER_LIMIT=4
 PROCESS_WORKER_LIMIT=4
 ```
@@ -75,13 +66,9 @@ PATH, the app falls back to the `imageio-ffmpeg` bundled executable. MP3 bitrate
 is capped at the downloaded audio bitrate; if the source bitrate is unknown,
 `DEFAULT_MP3_BITRATE` is used.
 
-Video mode also uses FFmpeg. During MP4 assembly the app prints FFmpeg progress
-to the console. MP4 video streams are copied without re-encoding; non-MP4 video
-streams are transcoded to H.264 before saving the final MP4.
-
-`FULL_AUTO=1` keeps the interaction short: paste a link, choose video or audio,
-then the app downloads the best available MP4 video or best audio track.
-Set `FULL_AUTO=0` to choose video quality or audio stream manually.
+Video mode also uses FFmpeg. The GUI shows download and conversion progress in
+the progress bar. MP4 video streams are copied without re-encoding; non-MP4
+video streams are transcoded to H.264 before saving the final MP4.
 
 `DOWNLOAD_WORKER_LIMIT` limits simultaneous downloads in bulk-style flows.
 `PROCESS_WORKER_LIMIT` limits simultaneous FFmpeg processing tasks.

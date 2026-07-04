@@ -24,17 +24,13 @@ from engine.service.logger import logger
 from engine.youtube_tools.youtube_tools import DownloadYTAudio, YouTube, get_audio_streams
 
 
-InputFunc = Callable[[str], str]
 PrintFunc = Callable[[str], None]
-PromptAudioStreamFunc = Callable[[list, int, InputFunc, PrintFunc], object]
 
 
 def download_audio(
     video: YouTube,
     config,
-    input_func: InputFunc,
     print_func: PrintFunc,
-    prompt_audio_stream_func: PromptAudioStreamFunc,
     cancel_token: CancellationToken | None = None,
     download_history: DownloadHistory | None = None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None = None,
@@ -51,19 +47,11 @@ def download_audio(
     if cancel_token is not None:
         cancel_token.raise_if_cancelled()
 
-    if config.full_auto:
-        stream = audio_streams[0]
-        print_func(
-            "Full auto: выбрана лучшая аудио-дорожка "
-            f"{describe_mp3_audio_stream(stream, config.default_mp3_bitrate)}."
-        )
-    else:
-        stream = prompt_audio_stream_func(
-            audio_streams,
-            config.default_mp3_bitrate,
-            input_func,
-            print_func,
-        )
+    stream = audio_streams[0]
+    print_func(
+        "Выбрана лучшая аудио-дорожка "
+        f"{describe_mp3_audio_stream(stream, config.default_mp3_bitrate)}."
+    )
 
     save_to = Path(config.audio_download_dir)
     save_to.mkdir(parents=True, exist_ok=True)

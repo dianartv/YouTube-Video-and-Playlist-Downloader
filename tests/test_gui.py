@@ -126,7 +126,6 @@ class GuiTests(unittest.TestCase):
             default_video_quality=720,
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
-            full_auto=True,
             download_worker_limit=6,
             process_worker_limit=3,
         )
@@ -366,7 +365,6 @@ class GuiTests(unittest.TestCase):
                 default_video_quality=720,
                 default_mp3_bitrate=320,
                 ffmpeg_path="ffmpeg",
-                full_auto=True,
                 worker_limit=5,
             )
             worker = DownloadWorker(
@@ -401,7 +399,6 @@ class GuiTests(unittest.TestCase):
                 default_video_quality=720,
                 default_mp3_bitrate=320,
                 ffmpeg_path="ffmpeg",
-                full_auto=True,
                 worker_limit=4,
             )
             worker = DownloadWorker(
@@ -437,7 +434,6 @@ class GuiTests(unittest.TestCase):
                 default_video_quality=720,
                 default_mp3_bitrate=320,
                 ffmpeg_path="ffmpeg",
-                full_auto=True,
                 worker_limit=4,
             )
             worker = DownloadWorker(

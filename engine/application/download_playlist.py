@@ -15,10 +15,7 @@ from engine.service.logger import logger
 from engine.youtube_tools.youtube_tools import Playlist, YouTube
 
 
-InputFunc = Callable[[str], str]
 PrintFunc = Callable[[str], None]
-PromptVideoResolutionFunc = Callable[[list[int], int, list[int] | None, InputFunc, PrintFunc], int]
-PromptAudioStreamFunc = Callable[[list, int, InputFunc, PrintFunc], object]
 
 
 def get_playlist_output_dir(config, media_mode: str, playlist_title: str | None) -> Path:
@@ -30,10 +27,7 @@ def download_playlist(
     playlist: Playlist,
     media_mode: str,
     config,
-    input_func: InputFunc,
     print_func: PrintFunc,
-    prompt_video_resolution_func: PromptVideoResolutionFunc,
-    prompt_audio_stream_func: PromptAudioStreamFunc,
     download_history: DownloadHistory | None = None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None = None,
     cancel_token: CancellationToken | None = None,
@@ -81,9 +75,7 @@ def download_playlist(
                 result = download_audio(
                     video=video,
                     config=playlist_config,
-                    input_func=input_func,
                     print_func=print_func,
-                    prompt_audio_stream_func=prompt_audio_stream_func,
                     download_history=download_history,
                     confirm_overwrite_func=confirm_overwrite_func,
                     cancel_token=cancel_token,
@@ -92,10 +84,7 @@ def download_playlist(
                 result = download_video(
                     video=video,
                     config=playlist_config,
-                    input_func=input_func,
                     print_func=print_func,
-                    prompt_video_resolution_func=prompt_video_resolution_func,
-                    prompt_audio_stream_func=prompt_audio_stream_func,
                     download_history=download_history,
                     confirm_overwrite_func=confirm_overwrite_func,
                     cancel_token=cancel_token,

@@ -13,9 +13,7 @@ from engine.service.cancellation import CancellationToken, OperationCancelled
 from engine.youtube_tools.youtube_tools import YouTube
 
 
-InputFunc = Callable[[str], str]
 PrintFunc = Callable[[str], None]
-PromptAudioStreamFunc = Callable[[list, int, InputFunc, PrintFunc], object]
 
 
 @dataclass(frozen=True)
@@ -55,9 +53,7 @@ def download_audio_bulk(
     *,
     urls: list[str],
     config,
-    input_func: InputFunc,
     print_func: PrintFunc,
-    prompt_audio_stream_func: PromptAudioStreamFunc,
     download_history: DownloadHistory | None = None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None = None,
     cancel_token: CancellationToken | None = None,
@@ -92,9 +88,7 @@ def download_audio_bulk(
                 total=len(prepared_urls),
                 url=url,
                 config=config,
-                input_func=input_func,
                 print_func=print_func,
-                prompt_audio_stream_func=prompt_audio_stream_func,
                 download_history=download_history,
                 confirm_overwrite_func=confirm_overwrite_func,
                 cancel_token=cancel_token,
@@ -143,9 +137,7 @@ def _download_one(
     total: int,
     url: str,
     config,
-    input_func: InputFunc,
     print_func: PrintFunc,
-    prompt_audio_stream_func: PromptAudioStreamFunc,
     download_history: DownloadHistory | None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None,
     cancel_token: CancellationToken | None,
@@ -164,9 +156,7 @@ def _download_one(
     return download_audio(
         video=video,
         config=config,
-        input_func=input_func,
         print_func=item_print,
-        prompt_audio_stream_func=prompt_audio_stream_func,
         cancel_token=cancel_token,
         download_history=download_history,
         confirm_overwrite_func=confirm_overwrite_func,

@@ -7,9 +7,7 @@ from engine.youtube_tools.youtube_tools import (
     YouTube,
     download_stream,
     get_audio_streams,
-    get_best_video_stream_for_resolution,
     get_best_video_stream_no_higher_than,
-    get_video_resolutions_no_higher_than,
     get_video_streams_no_higher_than,
 )
 
@@ -203,34 +201,6 @@ class VideoStreamSelectionTests(unittest.TestCase):
 
         with self.assertRaises(ItagDoesNotExist):
             get_best_video_stream_no_higher_than(fake_video, max_resolution=720)
-
-    def test_get_video_resolutions_no_higher_than_returns_unique_values(self):
-        fake_video = FakeVideoWithStreams(
-            [
-                FakeFormatStream(137, "1080p", subtype="mp4"),
-                FakeFormatStream(248, "1080p", subtype="webm"),
-                FakeFormatStream(136, "720p", subtype="mp4"),
-            ]
-        )
-
-        resolutions = get_video_resolutions_no_higher_than(
-            fake_video,
-            max_resolution=1080,
-        )
-
-        self.assertEqual(resolutions, [1080, 720])
-
-    def test_get_best_video_stream_for_resolution_returns_sorted_match(self):
-        streams = [
-            FakeFormatStream(248, "1080p", subtype="webm"),
-            FakeFormatStream(137, "1080p", subtype="mp4"),
-        ]
-        fake_video = FakeVideoWithStreams(streams)
-        sorted_streams = get_video_streams_no_higher_than(fake_video, 1080)
-
-        stream = get_best_video_stream_for_resolution(sorted_streams, 1080)
-
-        self.assertEqual(stream.itag, 137)
 
 
 if __name__ == "__main__":

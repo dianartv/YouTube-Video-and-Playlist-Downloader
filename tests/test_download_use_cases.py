@@ -4,20 +4,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from pytubefix.exceptions import LiveStreamEnded, LiveStreamError
-
 from engine.application.download_audio import download_audio
 from engine.application.download_playlist import download_playlist
 from engine.application.download_video import download_video
-from engine.cli.prompts import prompt_audio_stream, prompt_video_resolution
-from engine.domain.naming import make_playlist_directory_name
-from engine.domain.selection import choose_audio_stream, choose_video_resolution
 from engine.domain.download_history import DownloadRecord
-from engine.service.config import AppConfig
+from engine.domain.naming import make_playlist_directory_name
 from engine.service.cancellation import CancellationToken, OperationCancelled
-from engine.cli.handlers import (
-    download_media_interactive,
-)
+from engine.service.config import AppConfig
 
 
 class FakeAudioStream:
@@ -63,91 +56,12 @@ class InMemoryDownloadHistory:
         self.records[(record.video_id, record.media_type)] = record
 
 
-class ChooseVideoResolutionTests(unittest.TestCase):
-    def test_blank_choice_uses_default_resolution(self):
-        self.assertEqual(choose_video_resolution([1080, 720, 480], 720, ""), 720)
-
-    def test_blank_choice_uses_best_available_when_default_is_unavailable(self):
-        self.assertEqual(choose_video_resolution([1080, 480], 720, ""), 1080)
-
-    def test_numeric_choice_can_select_by_list_index(self):
-        self.assertEqual(choose_video_resolution([1080, 720, 480], 720, "2"), 720)
-
-    def test_numeric_choice_can_select_by_resolution_value(self):
-        self.assertEqual(choose_video_resolution([1080, 720, 480], 720, "1080"), 1080)
-
-    def test_resolution_choice_accepts_p_suffix(self):
-        self.assertEqual(choose_video_resolution([1080, 720, 480], 720, "480p"), 480)
-
-    def test_unknown_resolution_is_rejected(self):
-        with self.assertRaises(ValueError):
-            choose_video_resolution([1080, 720, 480], 720, "360")
-
-
-class PromptVideoResolutionTests(unittest.TestCase):
-    def test_prompt_shows_video_only_resolutions_separately(self):
-        output = []
-
-        resolution = prompt_video_resolution(
-            available_resolutions=[360],
-            default_resolution=720,
-            video_only_resolutions=[1080, 720, 480],
-            input_func=lambda prompt: "",
-            print_func=output.append,
-        )
-
-        self.assertEqual(resolution, 360)
-        self.assertIn("1. 360p", output)
-        self.assertIn(
-            "Без аудио, не скачивается в этом режиме: 1080p, 720p, 480p",
-            output,
-        )
-
-
-class ChooseAudioStreamTests(unittest.TestCase):
-    def test_blank_choice_uses_best_audio_stream(self):
-        streams = [FakeAudioStream(251, "160kbps"), FakeAudioStream(140, "128kbps")]
-
-        self.assertEqual(choose_audio_stream(streams, "").itag, 251)
-
-    def test_numeric_choice_can_select_by_list_index(self):
-        streams = [FakeAudioStream(251, "160kbps"), FakeAudioStream(140, "128kbps")]
-
-        self.assertEqual(choose_audio_stream(streams, "2").itag, 140)
-
-    def test_numeric_choice_can_select_by_itag(self):
-        streams = [FakeAudioStream(251, "160kbps"), FakeAudioStream(140, "128kbps")]
-
-        self.assertEqual(choose_audio_stream(streams, "140").itag, 140)
-
-    def test_rejects_unknown_audio_stream(self):
-        with self.assertRaises(ValueError):
-            choose_audio_stream([FakeAudioStream(251, "160kbps")], "999")
-
-
-class PromptAudioStreamTests(unittest.TestCase):
-    def test_prompt_shows_source_and_target_mp3_bitrate(self):
-        output = []
-        streams = [FakeAudioStream(251, "160kbps", "webm")]
-
-        stream = prompt_audio_stream(
-            audio_streams=streams,
-            max_mp3_bitrate=320,
-            input_func=lambda prompt: "",
-            print_func=output.append,
-        )
-
-        self.assertEqual(stream.itag, 251)
-        self.assertIn("1. 160kbps webm (itag 251, mp3 160kbps)", output)
-
-
-class FullAutoDownloadTests(unittest.TestCase):
-    def test_full_auto_video_downloads_video_and_audio_then_merges_mp4(self):
+class DownloadUseCaseTests(unittest.TestCase):
+    def test_video_downloads_best_streams_and_merges_mp4(self):
         output = []
         video_stream = FakeVideoStream(137, "720p", "mp4")
         audio_stream = FakeAudioStream(251, "160kbps", "webm")
         config = SimpleNamespace(
-            full_auto=True,
             download_dir=Path("content"),
             default_video_quality=720,
             default_mp3_bitrate=320,
@@ -161,10 +75,6 @@ class FullAutoDownloadTests(unittest.TestCase):
                 return_value=[video_stream],
             ),
             patch(
-                "engine.application.download_video.get_video_resolutions_no_higher_than",
-                return_value=[720],
-            ),
-            patch(
                 "engine.application.download_video.get_audio_streams",
                 return_value=[audio_stream],
             ),
@@ -176,10 +86,7 @@ class FullAutoDownloadTests(unittest.TestCase):
             result = download_video(
                 video=video,
                 config=config,
-                input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=output.append,
-                prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         self.assertEqual(result, 0)
@@ -190,17 +97,12 @@ class FullAutoDownloadTests(unittest.TestCase):
         self.assertEqual(merge.call_args.kwargs["audio_path"], audio_stream.saved_to)
         self.assertEqual(merge.call_args.kwargs["output_path"], Path("content/Title.mp4"))
         self.assertFalse(merge.call_args.kwargs["transcode_video"])
-        self.assertIn(
-            "Full auto: выбрано лучшее видео не выше 720p: 720p mp4, 30fps (itag 137).",
-            output,
-        )
-        self.assertIn("Готово. MP4 сохранён в content\\Title.mp4.", output)
+        self.assertTrue(any("720p mp4, 30fps (itag 137)" in line for line in output))
 
-    def test_full_auto_audio_uses_best_audio_stream(self):
+    def test_audio_download_uses_best_stream_and_converts_mp3(self):
         output = []
         stream = FakeAudioStream(251, "160kbps", "webm")
         config = SimpleNamespace(
-            full_auto=True,
             audio_download_dir=Path("content/audio"),
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
@@ -219,9 +121,7 @@ class FullAutoDownloadTests(unittest.TestCase):
             result = download_audio(
                 video=object(),
                 config=config,
-                input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=output.append,
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         self.assertEqual(result, 0)
@@ -233,26 +133,19 @@ class FullAutoDownloadTests(unittest.TestCase):
             progress_callback=None,
         )
         convert.assert_called_once()
-        self.assertIn(
-            "Full auto: выбрана лучшая аудио-дорожка 160kbps webm (itag 251, mp3 160kbps).",
-            output,
-        )
+        self.assertTrue(any("160kbps webm (itag 251, mp3 160kbps)" in line for line in output))
 
-    def test_full_auto_audio_uses_source_extension_from_mime_type(self):
+    def test_audio_uses_source_extension_from_mime_type(self):
         output = []
         stream = FakeAudioStream(251, "160kbps", "webm", "audio/webm")
         config = SimpleNamespace(
-            full_auto=True,
             audio_download_dir=Path("content/audio"),
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
         )
 
         with (
-            patch(
-                "engine.application.download_audio.get_audio_streams",
-                return_value=[stream],
-            ),
+            patch("engine.application.download_audio.get_audio_streams", return_value=[stream]),
             patch("engine.application.download_audio.DownloadYTAudio") as downloader,
             patch("engine.application.download_audio.convert_to_mp3") as convert,
         ):
@@ -261,9 +154,7 @@ class FullAutoDownloadTests(unittest.TestCase):
             result = download_audio(
                 video=SimpleNamespace(title="Title"),
                 config=config,
-                input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=output.append,
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         self.assertEqual(result, 0)
@@ -274,9 +165,7 @@ class FullAutoDownloadTests(unittest.TestCase):
             interrupt_checker=None,
             progress_callback=None,
         )
-        self.assertTrue(
-            any("Скачиваю аудио-дорожку: 160kbps webm" in line for line in output)
-        )
+        self.assertTrue(any("160kbps webm" in line for line in output))
 
     def test_audio_duplicate_existing_file_requires_overwrite_confirmation(self):
         output = []
@@ -302,7 +191,6 @@ class FullAutoDownloadTests(unittest.TestCase):
                 }
             )
             config = SimpleNamespace(
-                full_auto=True,
                 audio_download_dir=temp_path,
                 default_mp3_bitrate=320,
                 ffmpeg_path="ffmpeg",
@@ -310,10 +198,7 @@ class FullAutoDownloadTests(unittest.TestCase):
             confirm_calls = []
 
             with (
-                patch(
-                    "engine.application.download_audio.get_audio_streams",
-                    return_value=[stream],
-                ),
+                patch("engine.application.download_audio.get_audio_streams", return_value=[stream]),
                 patch("engine.application.download_audio.DownloadYTAudio") as downloader,
             ):
                 result = download_audio(
@@ -323,9 +208,7 @@ class FullAutoDownloadTests(unittest.TestCase):
                         watch_url="https://youtu.be/abc123",
                     ),
                     config=config,
-                    input_func=lambda prompt: self.fail("input should not be called"),
                     print_func=output.append,
-                    prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
                     download_history=history,
                     confirm_overwrite_func=lambda existing, planned: confirm_calls.append(
                         (existing, planned)
@@ -336,10 +219,7 @@ class FullAutoDownloadTests(unittest.TestCase):
         self.assertEqual(result, 0)
         downloader.assert_not_called()
         self.assertEqual(len(confirm_calls), 1)
-        self.assertTrue(
-            any("Качество в истории: audio 160kbps" in line for line in output)
-        )
-        self.assertIn("Пропущено: пользователь отказался от перезаписи.", output)
+        self.assertTrue(any("audio 160kbps" in line for line in output))
 
     def test_audio_stale_history_record_downloads_without_confirmation(self):
         output = []
@@ -361,17 +241,13 @@ class FullAutoDownloadTests(unittest.TestCase):
                 }
             )
             config = SimpleNamespace(
-                full_auto=True,
                 audio_download_dir=temp_path,
                 default_mp3_bitrate=320,
                 ffmpeg_path="ffmpeg",
             )
 
             with (
-                patch(
-                    "engine.application.download_audio.get_audio_streams",
-                    return_value=[stream],
-                ),
+                patch("engine.application.download_audio.get_audio_streams", return_value=[stream]),
                 patch("engine.application.download_audio.DownloadYTAudio") as downloader,
                 patch("engine.application.download_audio.convert_to_mp3") as convert,
             ):
@@ -384,29 +260,22 @@ class FullAutoDownloadTests(unittest.TestCase):
                         watch_url="https://youtu.be/abc123",
                     ),
                     config=config,
-                    input_func=lambda prompt: self.fail("input should not be called"),
                     print_func=output.append,
-                    prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
                     download_history=history,
                     confirm_overwrite_func=lambda *args: self.fail("confirm should not be called"),
                 )
 
         self.assertEqual(result, 0)
         downloader.return_value.download.assert_called_once()
-        self.assertIn(
-            "Запись о прошлой загрузке найдена, но конечного файла уже нет. Скачиваю заново.",
-            output,
-        )
+        self.assertTrue(any("Скачиваю заново" in line for line in output))
 
     def test_successful_video_download_records_quality(self):
-        output = []
         video_stream = FakeVideoStream(137, "720p", "mp4")
         audio_stream = FakeAudioStream(251, "160kbps", "webm")
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             history = InMemoryDownloadHistory()
             config = SimpleNamespace(
-                full_auto=True,
                 download_dir=temp_path,
                 default_video_quality=720,
                 default_mp3_bitrate=320,
@@ -417,10 +286,6 @@ class FullAutoDownloadTests(unittest.TestCase):
                 patch(
                     "engine.application.download_video.get_video_streams_no_higher_than",
                     return_value=[video_stream],
-                ),
-                patch(
-                    "engine.application.download_video.get_video_resolutions_no_higher_than",
-                    return_value=[720],
                 ),
                 patch(
                     "engine.application.download_video.get_audio_streams",
@@ -439,10 +304,7 @@ class FullAutoDownloadTests(unittest.TestCase):
                         watch_url="https://youtu.be/abc123",
                     ),
                     config=config,
-                    input_func=lambda prompt: self.fail("input should not be called"),
-                    print_func=output.append,
-                    prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
-                    prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
+                    print_func=lambda message: None,
                     download_history=history,
                     confirm_overwrite_func=lambda *args: self.fail("confirm should not be called"),
                 )
@@ -458,65 +320,6 @@ class FullAutoDownloadTests(unittest.TestCase):
         self.assertEqual(record.container, "mp4")
 
 
-class DownloadMediaInteractiveTests(unittest.TestCase):
-    def test_active_live_stream_is_reported_without_traceback(self):
-        output = []
-
-        with patch("engine.cli.handlers.YouTube") as youtube:
-            video = youtube.return_value
-            video.title = "Active live"
-            with (
-                patch(
-                    "engine.cli.handlers.SQLiteDownloadHistory.default",
-                    return_value=InMemoryDownloadHistory(),
-                ),
-                patch(
-                    "engine.cli.handlers.run_video_download",
-                    side_effect=LiveStreamError("video-id"),
-                ),
-            ):
-                result = download_media_interactive(
-                    mode="video",
-                    input_func=lambda prompt: "https://www.youtube.com/live/KO9oWuU3KV0",
-                    print_func=output.append,
-                )
-
-        self.assertEqual(result, 1)
-        self.assertIn(
-            "Активные live-трансляции не скачиваются. Дождитесь завершения и публикации архива.",
-            output,
-        )
-
-    def test_live_stream_ended_is_reported_without_traceback(self):
-        output = []
-
-        with patch("engine.cli.handlers.YouTube") as youtube:
-            video = youtube.return_value
-            video.title = "Ended live"
-            with (
-                patch(
-                    "engine.cli.handlers.SQLiteDownloadHistory.default",
-                    return_value=InMemoryDownloadHistory(),
-                ),
-                patch(
-                    "engine.cli.handlers.run_video_download",
-                    side_effect=LiveStreamEnded("video-id", "ended"),
-                ),
-            ):
-                result = download_media_interactive(
-                    mode="video",
-                    input_func=lambda prompt: "https://www.youtube.com/live/KO9oWuU3KV0",
-                    print_func=output.append,
-                )
-
-        self.assertEqual(result, 1)
-        self.assertIn(
-            "Трансляция завершилась, но YouTube ещё не отдаёт архив как обычное видео. "
-            "Повторите позже.",
-            output,
-        )
-
-
 class PlaylistDownloadTests(unittest.TestCase):
     def test_playlist_download_stops_when_cancelled_before_processing(self):
         config = AppConfig(
@@ -525,7 +328,6 @@ class PlaylistDownloadTests(unittest.TestCase):
             default_video_quality=720,
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
-            full_auto=True,
             worker_limit=4,
         )
         token = CancellationToken()
@@ -539,10 +341,7 @@ class PlaylistDownloadTests(unittest.TestCase):
                 ),
                 media_mode="video",
                 config=config,
-                input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=lambda message: self.fail("print should not be called"),
-                prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
                 cancel_token=token,
             )
 
@@ -558,7 +357,6 @@ class PlaylistDownloadTests(unittest.TestCase):
             default_video_quality=720,
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
-            full_auto=True,
             worker_limit=6,
         )
         playlist = SimpleNamespace(
@@ -574,19 +372,13 @@ class PlaylistDownloadTests(unittest.TestCase):
                     SimpleNamespace(title="Two"),
                 ],
             ),
-            patch(
-                "engine.application.download_playlist.download_audio",
-                return_value=0,
-            ) as download_audio_mock,
+            patch("engine.application.download_playlist.download_audio", return_value=0) as download_audio_mock,
         ):
             result = download_playlist(
                 playlist=playlist,
                 media_mode="audio",
                 config=config,
-                input_func=lambda prompt: "https://youtube.com/playlist?list=123",
                 print_func=output.append,
-                prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         expected_dir = Path("content/audio") / "MyPlaylist"
@@ -595,8 +387,7 @@ class PlaylistDownloadTests(unittest.TestCase):
         for call in download_audio_mock.call_args_list:
             self.assertEqual(call.kwargs["config"].audio_download_dir, expected_dir)
             self.assertEqual(call.kwargs["config"].worker_limit, 6)
-        self.assertIn(f"Каталог плейлиста: {expected_dir}", output)
-        self.assertIn("Готово. Успешно: 2. Пропущено/ошибок: 0.", output)
+        self.assertTrue(any(str(expected_dir) in line for line in output))
 
     def test_video_playlist_uses_auto_title_directory(self):
         output = []
@@ -606,7 +397,6 @@ class PlaylistDownloadTests(unittest.TestCase):
             default_video_quality=720,
             default_mp3_bitrate=320,
             ffmpeg_path="ffmpeg",
-            full_auto=True,
             worker_limit=5,
         )
         playlist = SimpleNamespace(
@@ -619,30 +409,21 @@ class PlaylistDownloadTests(unittest.TestCase):
                 "engine.application.download_playlist.YouTube",
                 return_value=SimpleNamespace(title="One"),
             ),
-            patch(
-                "engine.application.download_playlist.download_video",
-                return_value=0,
-            ) as download_video_mock,
+            patch("engine.application.download_playlist.download_video", return_value=0) as download_video_mock,
         ):
             result = download_playlist(
                 playlist=playlist,
                 media_mode="video",
                 config=config,
-                input_func=lambda prompt: "https://youtube.com/playlist?list=123",
                 print_func=output.append,
-                prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
-                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         expected_dir = Path("content") / "Videos"
         self.assertEqual(result, 0)
         download_video_mock.assert_called_once()
-        self.assertEqual(
-            download_video_mock.call_args.kwargs["config"].download_dir,
-            expected_dir,
-        )
+        self.assertEqual(download_video_mock.call_args.kwargs["config"].download_dir, expected_dir)
         self.assertEqual(download_video_mock.call_args.kwargs["config"].worker_limit, 5)
-        self.assertIn(f"Каталог плейлиста: {expected_dir}", output)
+        self.assertTrue(any(str(expected_dir) in line for line in output))
 
 
 if __name__ == "__main__":

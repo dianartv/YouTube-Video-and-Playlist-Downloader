@@ -1,46 +1,5 @@
-import argparse
-from collections.abc import Sequence
-
-from engine.cli.handlers import download_media_interactive, download_playlist_interactive
-from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
-
-
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Download YouTube MP4 video, audio-only MP3, or playlists.",
-    )
-    parser.add_argument(
-        "--playlist",
-        action="store_true",
-        help="download all items from a playlist",
-    )
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument(
-        "--video",
-        action="store_const",
-        const=VIDEO_MODE,
-        dest="mode",
-        help="download video and audio streams, then merge them to MP4",
-    )
-    mode.add_argument(
-        "--audio",
-        "--audio-only",
-        action="store_const",
-        const=AUDIO_MODE,
-        dest="mode",
-        help="download the best audio stream and convert it to MP3",
-    )
-
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
-    if args.playlist:
-        return download_playlist_interactive(media_mode=args.mode)
-
-    return download_media_interactive(mode=args.mode)
+from engine.gui.app import run
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())
