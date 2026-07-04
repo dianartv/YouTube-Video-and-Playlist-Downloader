@@ -12,7 +12,9 @@ DEFAULT_DOWNLOAD_WORKER_LIMIT = 4
 DEFAULT_PROCESS_WORKER_LIMIT = 4
 DEFAULT_WORKER_LIMIT = DEFAULT_DOWNLOAD_WORKER_LIMIT
 MIN_WORKER_LIMIT = 1
-MAX_WORKER_LIMIT = 8
+MAX_DOWNLOAD_WORKER_LIMIT = 8
+MAX_PROCESS_WORKER_LIMIT = 12
+MAX_WORKER_LIMIT = MAX_DOWNLOAD_WORKER_LIMIT
 DEFAULT_ENV_PATH = Path(".env")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,6 +61,7 @@ class AppConfig:
             _validate_worker_limit(
                 DEFAULT_DOWNLOAD_WORKER_LIMIT if download_worker_limit is None else download_worker_limit,
                 "DOWNLOAD_WORKER_LIMIT",
+                MAX_DOWNLOAD_WORKER_LIMIT,
             ),
         )
         object.__setattr__(
@@ -67,6 +70,7 @@ class AppConfig:
             _validate_worker_limit(
                 DEFAULT_PROCESS_WORKER_LIMIT if process_worker_limit is None else process_worker_limit,
                 "PROCESS_WORKER_LIMIT",
+                MAX_PROCESS_WORKER_LIMIT,
             ),
         )
 
@@ -163,8 +167,16 @@ def save_parallel_limits(
     process_worker_limit: int,
     path: Path = DEFAULT_ENV_PATH,
 ) -> None:
-    download_limit = _validate_worker_limit(download_worker_limit, "DOWNLOAD_WORKER_LIMIT")
-    process_limit = _validate_worker_limit(process_worker_limit, "PROCESS_WORKER_LIMIT")
+    download_limit = _validate_worker_limit(
+        download_worker_limit,
+        "DOWNLOAD_WORKER_LIMIT",
+        MAX_DOWNLOAD_WORKER_LIMIT,
+    )
+    process_limit = _validate_worker_limit(
+        process_worker_limit,
+        "PROCESS_WORKER_LIMIT",
+        MAX_PROCESS_WORKER_LIMIT,
+    )
     if not path.exists():
         ensure_env_file(path)
 
@@ -251,14 +263,24 @@ def _parse_bool(raw_value: str) -> bool:
 
 
 def _parse_worker_limit(raw_value: str, key: str) -> int:
+    max_value = _max_worker_limit_for_key(key)
     try:
-        return _validate_worker_limit(int(raw_value), key)
+        return _validate_worker_limit(int(raw_value), key, max_value)
     except ValueError as exc:
-        raise ValueError(f"{key} must be an integer from 1 to 8") from exc
+        raise ValueError(f"{key} must be an integer from 1 to {max_value}") from exc
 
 
-def _validate_worker_limit(value: int, key: str) -> int:
-    if value < MIN_WORKER_LIMIT or value > MAX_WORKER_LIMIT:
-        raise ValueError(f"{key} must be from 1 to 8")
+def _validate_worker_limit(value: int, key: str, max_value: int | None = None) -> int:
+    if max_value is None:
+        max_value = _max_worker_limit_for_key(key)
+    if value < MIN_WORKER_LIMIT or value > max_value:
+        raise ValueError(f"{key} must be from 1 to {max_value}")
 
     return value
+
+
+def _max_worker_limit_for_key(key: str) -> int:
+    if key == "PROCESS_WORKER_LIMIT":
+        return MAX_PROCESS_WORKER_LIMIT
+
+    return MAX_DOWNLOAD_WORKER_LIMIT

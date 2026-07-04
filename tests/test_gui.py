@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 from engine.domain.download_history import DownloadRecord
 from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
 from engine.gui.workers import DownloadWorker, OverwriteRequest
-from engine.gui.app import MainWindow
+from engine.gui.app import MainWindow, _question_with_russian_buttons
 from engine.service.config import AppConfig
 
 
@@ -141,6 +141,8 @@ class GuiTests(unittest.TestCase):
         self.assertIs(window.config, saved_config)
         self.assertFalse(hasattr(settings_tab, "save_button"))
         self.assertFalse(hasattr(settings_tab, "status_label"))
+        self.assertEqual(settings_tab.download_worker_limit_select.itemData(settings_tab.download_worker_limit_select.count() - 1), 8)
+        self.assertEqual(settings_tab.process_worker_limit_select.itemData(settings_tab.process_worker_limit_select.count() - 1), 12)
 
     def test_download_finish_keeps_thread_until_thread_finished(self):
         window = MainWindow()
@@ -168,7 +170,7 @@ class GuiTests(unittest.TestCase):
         self.assertIsNone(window.active_worker)
         self.assertIsNone(window.active_tab)
 
-    def test_download_finish_shows_total_elapsed_time_under_logs(self):
+    def test_download_finish_shows_elapsed_time_under_logs(self):
         window = MainWindow()
         tabs = window.findChild(QTabWidget)
         audio_tab = tabs.widget(1)
@@ -176,12 +178,26 @@ class GuiTests(unittest.TestCase):
 
         with patch("engine.gui.app.time.perf_counter", side_effect=[100.0, 165.0]):
             audio_tab.prepare_for_download()
-            self.assertEqual(audio_tab.elapsed_label.text(), "Общее время выполнения: 00:00")
+            self.assertEqual(audio_tab.elapsed_label.text(), "Время выполнения: 00:00")
+            self.assertTrue(audio_tab.elapsed_timer.isActive())
 
             window._download_finished(0)
 
-        self.assertEqual(audio_tab.elapsed_label.text(), "Общее время выполнения: 01:05")
+        self.assertEqual(audio_tab.elapsed_label.text(), "Время выполнения: 01:05")
         self.assertIsNone(audio_tab.started_at)
+        self.assertFalse(audio_tab.elapsed_timer.isActive())
+
+    def test_elapsed_time_updates_while_download_is_running(self):
+        window = MainWindow()
+        tabs = window.findChild(QTabWidget)
+        audio_tab = tabs.widget(1)
+
+        with patch("engine.gui.app.time.perf_counter", side_effect=[100.0, 103.0]):
+            audio_tab.prepare_for_download()
+            audio_tab.update_elapsed_time()
+
+        self.assertEqual(audio_tab.elapsed_label.text(), "Время выполнения: 00:03")
+        audio_tab.elapsed_timer.stop()
 
     def test_request_cancel_requires_confirmation(self):
         window = MainWindow()
@@ -192,12 +208,61 @@ class GuiTests(unittest.TestCase):
         window.active_tab = audio_tab
 
         with patch(
-            "engine.gui.app.QMessageBox.question",
+            "engine.gui.app._question_with_russian_buttons",
             return_value=QMessageBox.StandardButton.No,
         ):
             window.request_cancel(audio_tab)
 
         worker.cancel.assert_not_called()
+
+    def test_question_dialog_uses_russian_button_labels(self):
+        class FakeButton:
+            def __init__(self):
+                self.text = None
+
+            def setText(self, text):
+                self.text = text
+
+        class FakeMessageBox:
+            StandardButton = QMessageBox.StandardButton
+            Icon = QMessageBox.Icon
+            last_dialog = None
+
+            def __init__(self, parent):
+                self.parent = parent
+                self.buttons = {
+                    QMessageBox.StandardButton.Yes: FakeButton(),
+                    QMessageBox.StandardButton.No: FakeButton(),
+                }
+                FakeMessageBox.last_dialog = self
+
+            def setWindowTitle(self, title):
+                self.title = title
+
+            def setText(self, text):
+                self.text = text
+
+            def setIcon(self, icon):
+                self.icon = icon
+
+            def setStandardButtons(self, buttons):
+                self.standard_buttons = buttons
+
+            def setDefaultButton(self, button):
+                self.default_button = button
+
+            def button(self, button):
+                return self.buttons[button]
+
+            def exec(self):
+                return QMessageBox.StandardButton.Yes.value
+
+        with patch("engine.gui.app.QMessageBox", FakeMessageBox):
+            result = _question_with_russian_buttons(None, "Title", "Text")
+
+        self.assertEqual(result, QMessageBox.StandardButton.Yes)
+        self.assertEqual(FakeMessageBox.last_dialog.buttons[QMessageBox.StandardButton.Yes].text, "Да")
+        self.assertEqual(FakeMessageBox.last_dialog.buttons[QMessageBox.StandardButton.No].text, "Нет")
 
     def test_request_cancel_calls_worker_cancel_after_confirmation(self):
         window = MainWindow()
@@ -209,7 +274,7 @@ class GuiTests(unittest.TestCase):
         audio_tab.prepare_for_download()
 
         with patch(
-            "engine.gui.app.QMessageBox.question",
+            "engine.gui.app._question_with_russian_buttons",
             return_value=QMessageBox.StandardButton.Yes,
         ):
             window.request_cancel(audio_tab)
@@ -217,6 +282,7 @@ class GuiTests(unittest.TestCase):
         worker.cancel.assert_called_once()
         self.assertFalse(audio_tab.cancel_button.isEnabled())
         self.assertIn("Пользователь подтвердил отмену.", audio_tab.log_output.toPlainText())
+        audio_tab.elapsed_timer.stop()
 
     def test_cancelled_finish_sets_cancelled_status(self):
         window = MainWindow()
@@ -280,7 +346,7 @@ class GuiTests(unittest.TestCase):
         )
 
         with patch(
-            "engine.gui.app.QMessageBox.question",
+            "engine.gui.app._question_with_russian_buttons",
             return_value=QMessageBox.StandardButton.Yes,
         ) as question:
             window._confirm_overwrite(request)

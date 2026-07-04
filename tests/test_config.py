@@ -61,7 +61,7 @@ class ConfigTests(unittest.TestCase):
                         "FFMPEG_PATH=tools/ffmpeg.exe",
                         "FULL_AUTO=0",
                         "DOWNLOAD_WORKER_LIMIT=7",
-                        "PROCESS_WORKER_LIMIT=3",
+                        "PROCESS_WORKER_LIMIT=12",
                         "",
                     ]
                 ),
@@ -77,7 +77,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.ffmpeg_path, "tools/ffmpeg.exe")
         self.assertFalse(config.full_auto)
         self.assertEqual(config.download_worker_limit, 7)
-        self.assertEqual(config.process_worker_limit, 3)
+        self.assertEqual(config.process_worker_limit, 12)
 
     def test_load_config_uses_legacy_worker_limit_as_parallel_limits(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -186,9 +186,11 @@ class ConfigTests(unittest.TestCase):
                 load_config(env_path)
 
     def test_load_config_rejects_invalid_parallel_limits(self):
-        invalid_values = ["0", "9", "many"]
-        keys = ["DOWNLOAD_WORKER_LIMIT", "PROCESS_WORKER_LIMIT"]
-        for key in keys:
+        invalid_values_by_key = {
+            "DOWNLOAD_WORKER_LIMIT": ["0", "9", "many"],
+            "PROCESS_WORKER_LIMIT": ["0", "13", "many"],
+        }
+        for key, invalid_values in invalid_values_by_key.items():
             for value in invalid_values:
                 with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as temp_dir:
                     env_path = Path(temp_dir) / ".env"
@@ -212,12 +214,12 @@ class ConfigTests(unittest.TestCase):
             env_path = Path(temp_dir) / ".env"
             ensure_env_file(env_path)
 
-            save_parallel_limits(6, 2, env_path)
+            save_parallel_limits(6, 12, env_path)
             config = load_config(env_path)
             env_text = env_path.read_text(encoding="utf-8")
 
         self.assertEqual(config.download_worker_limit, 6)
-        self.assertEqual(config.process_worker_limit, 2)
+        self.assertEqual(config.process_worker_limit, 12)
         self.assertNotIn("\nWORKER_LIMIT=", f"\n{env_text}")
 
     def test_save_parallel_limits_appends_missing_env_values(self):

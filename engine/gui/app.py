@@ -2,7 +2,7 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QThread, QUrl, Slot
+from PySide6.QtCore import QThread, QTimer, QUrl, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (
 from engine.application.download_duplicates import format_duplicate_download
 from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
 from engine.service.config import (
-    MAX_WORKER_LIMIT,
+    MAX_DOWNLOAD_WORKER_LIMIT,
+    MAX_PROCESS_WORKER_LIMIT,
     MIN_WORKER_LIMIT,
     PROJECT_ROOT,
     ensure_env_file,
@@ -115,12 +116,10 @@ class MainWindow(QMainWindow):
         if self.active_worker is None or self.active_tab is not tab:
             return
 
-        answer = QMessageBox.question(
+        answer = _question_with_russian_buttons(
             self,
             "Отменить загрузку?",
             "Вы уверены? Текущие исходные файлы будут удалены.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -130,13 +129,11 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def _confirm_overwrite(self, request) -> None:
-        answer = QMessageBox.question(
+        answer = _question_with_russian_buttons(
             self,
             "Файл уже существует",
             f"{format_duplicate_download(request.existing_record, request.planned_record)}\n\n"
             "Перезаписать?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
         )
         request.resolve(answer == QMessageBox.StandardButton.Yes)
 
@@ -188,6 +185,17 @@ class MainWindow(QMainWindow):
                 background: #777777;
                 border-color: #777777;
             }
+            QComboBox:focus {
+                background: #f2f2f2;
+            }
+            QComboBox QAbstractItemView {
+                selection-background-color: #d9d9d9;
+                selection-color: #111111;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background: #d9d9d9;
+                color: #111111;
+            }
             QProgressBar {
                 border: 1px solid #111111;
                 border-radius: 4px;
@@ -228,6 +236,9 @@ class DownloadTab(QWidget):
         self.is_playlist = is_playlist
         self.parent_window = parent_window
         self.started_at: float | None = None
+        self.elapsed_timer = QTimer(self)
+        self.elapsed_timer.setInterval(1000)
+        self.elapsed_timer.timeout.connect(self.update_elapsed_time)
 
         self.url_input = QLineEdit()
         placeholder = "Вставьте ссылку на плейлист" if is_playlist else "Вставьте ссылку на YouTube"
@@ -266,7 +277,7 @@ class DownloadTab(QWidget):
         self.cancel_button.clicked.connect(lambda: self.parent_window.request_cancel(self))
 
         self.status_label = QLabel("Ожидание")
-        self.show_output_button = QPushButton("Показать")
+        self.show_output_button = QPushButton("Показать в проводнике")
         self.show_output_button.clicked.connect(self.open_output_dir)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -275,7 +286,7 @@ class DownloadTab(QWidget):
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.elapsed_label = QLabel("Общее время выполнения: -")
+        self.elapsed_label = QLabel("Время выполнения: -")
 
         self._build_layout()
 
@@ -382,6 +393,7 @@ class DownloadTab(QWidget):
         self.started_at = time.perf_counter()
         self.log_output.clear()
         self.set_elapsed_time(0)
+        self.elapsed_timer.start()
         self.set_status("Старт")
         self.set_progress_busy(True)
         self.download_button.setEnabled(False)
@@ -424,6 +436,7 @@ class DownloadTab(QWidget):
             self.progress.setRange(0, 100)
 
     def finish_elapsed_time(self) -> None:
+        self.elapsed_timer.stop()
         if self.started_at is None:
             return
 
@@ -431,8 +444,14 @@ class DownloadTab(QWidget):
         self.set_elapsed_time(elapsed_seconds)
         self.started_at = None
 
+    def update_elapsed_time(self) -> None:
+        if self.started_at is None:
+            return
+
+        self.set_elapsed_time(time.perf_counter() - self.started_at)
+
     def set_elapsed_time(self, seconds: float) -> None:
-        self.elapsed_label.setText(f"Общее время выполнения: {_format_elapsed_time(seconds)}")
+        self.elapsed_label.setText(f"Время выполнения: {_format_elapsed_time(seconds)}")
 
     def open_output_dir(self) -> None:
         output_dir = self.output_dir_value()
@@ -456,15 +475,16 @@ class SettingsTab(QWidget):
 
         self.download_worker_limit_select = QComboBox()
         self.process_worker_limit_select = QComboBox()
-        for value in range(MIN_WORKER_LIMIT, MAX_WORKER_LIMIT + 1):
+        for value in range(MIN_WORKER_LIMIT, MAX_DOWNLOAD_WORKER_LIMIT + 1):
             self.download_worker_limit_select.addItem(str(value), value)
+        for value in range(MIN_WORKER_LIMIT, MAX_PROCESS_WORKER_LIMIT + 1):
             self.process_worker_limit_select.addItem(str(value), value)
 
         self.download_worker_limit_select.setCurrentIndex(
-            self._select_index(config.download_worker_limit),
+            self._select_index(config.download_worker_limit, self.download_worker_limit_select),
         )
         self.process_worker_limit_select.setCurrentIndex(
-            self._select_index(config.process_worker_limit),
+            self._select_index(config.process_worker_limit, self.process_worker_limit_select),
         )
         self.download_worker_limit_select.currentIndexChanged.connect(self.save_settings)
         self.process_worker_limit_select.currentIndexChanged.connect(self.save_settings)
@@ -500,11 +520,11 @@ class SettingsTab(QWidget):
         )
         self.parent_window.config = load_config()
 
-    def _select_index(self, value: int) -> int:
+    def _select_index(self, value: int, select: QComboBox) -> int:
         return max(
             0,
             min(
-                self.download_worker_limit_select.count() - 1,
+                select.count() - 1,
                 int(value) - MIN_WORKER_LIMIT,
             ),
         )
@@ -515,6 +535,28 @@ def run() -> int:
     window = MainWindow()
     window.show()
     return app.exec()
+
+
+def _question_with_russian_buttons(
+    parent,
+    title: str,
+    text: str,
+) -> QMessageBox.StandardButton:
+    dialog = QMessageBox(parent)
+    dialog.setWindowTitle(title)
+    dialog.setText(text)
+    dialog.setIcon(QMessageBox.Icon.Question)
+    dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    dialog.setDefaultButton(QMessageBox.StandardButton.No)
+
+    yes_button = dialog.button(QMessageBox.StandardButton.Yes)
+    no_button = dialog.button(QMessageBox.StandardButton.No)
+    if yes_button is not None:
+        yes_button.setText("Да")
+    if no_button is not None:
+        no_button.setText("Нет")
+
+    return QMessageBox.StandardButton(dialog.exec())
 
 
 def _format_elapsed_time(seconds: float) -> str:
