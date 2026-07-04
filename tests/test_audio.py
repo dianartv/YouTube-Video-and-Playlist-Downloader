@@ -39,7 +39,7 @@ class AudioServiceTests(unittest.TestCase):
                 ),
                 patch("engine.service.audio.subprocess.run") as run,
             ):
-                run.return_value = subprocess.CompletedProcess([], 0, "", "")
+                run.return_value = subprocess.CompletedProcess([], 0, b"", b"")
 
                 self.assertEqual(
                     convert_to_mp3(
@@ -68,7 +68,7 @@ class AudioServiceTests(unittest.TestCase):
                 ),
                 patch("engine.service.audio.subprocess.run") as run,
             ):
-                run.return_value = subprocess.CompletedProcess([], 1, "", "failed")
+                run.return_value = subprocess.CompletedProcess([], 1, b"", b"failed")
 
                 with self.assertRaises(AudioConversionError):
                     convert_to_mp3(
@@ -77,6 +77,36 @@ class AudioServiceTests(unittest.TestCase):
                         source_bitrate_kbps=160,
                         max_bitrate_kbps=320,
                     )
+
+    def test_convert_to_mp3_decodes_ffmpeg_error_bytes_safely(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "audio.webm"
+            output_path = Path(temp_dir) / "audio.mp3"
+            input_path.write_bytes(b"fake audio")
+
+            with (
+                patch(
+                    "engine.service.audio.resolve_ffmpeg_executable",
+                    return_value="ffmpeg",
+                ),
+                patch("engine.service.audio.subprocess.run") as run,
+            ):
+                run.return_value = subprocess.CompletedProcess(
+                    [],
+                    1,
+                    b"",
+                    b"bad byte: \x98",
+                )
+
+                with self.assertRaises(AudioConversionError) as exc:
+                    convert_to_mp3(
+                        input_path=input_path,
+                        output_path=output_path,
+                        source_bitrate_kbps=160,
+                        max_bitrate_kbps=320,
+                    )
+
+        self.assertIn("bad byte:", str(exc.exception))
 
 
 if __name__ == "__main__":

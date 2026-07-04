@@ -4,10 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from engine.youtube_tools.video_cli import (
-    AUDIO_MODE,
-    VIDEO_MODE,
     choose_audio_stream,
-    choose_download_mode,
     choose_video_resolution,
     prompt_audio_stream,
     prompt_video_resolution,
@@ -21,18 +18,6 @@ class FakeAudioStream:
         self.itag = itag
         self.abr = abr
         self.subtype = subtype
-
-
-class ChooseDownloadModeTests(unittest.TestCase):
-    def test_blank_choice_defaults_to_video_mode(self):
-        self.assertEqual(choose_download_mode(""), VIDEO_MODE)
-
-    def test_selects_audio_mode(self):
-        self.assertEqual(choose_download_mode("2"), AUDIO_MODE)
-
-    def test_rejects_unknown_mode(self):
-        with self.assertRaises(ValueError):
-            choose_download_mode("3")
 
 
 class ChooseVideoResolutionTests(unittest.TestCase):

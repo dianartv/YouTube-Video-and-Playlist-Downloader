@@ -19,20 +19,17 @@ uv sync
 
 ## Usage
 
-Run the downloader through `uv`, paste a YouTube URL, then choose whether to
-download video with audio or audio-only MP3.
+Run the downloader through `uv` with an explicit mode flag, then paste a
+YouTube URL.
 
 ```powershell
-uv run python main.py
+uv run python main.py --video
+uv run python main.py --audio
 ```
 
-`YT Download Video.py` is kept as a compatibility wrapper around `main.py`.
-
-Playlist downloading is still script-configured:
-
-```powershell
-uv run python "YT Download Playlist.py"
-```
+Use `--video` to download the best video stream that already includes audio.
+Use `--audio` or `--audio-only` to download the best audio stream and convert it
+to MP3.
 
 Default values are stored in `.env`:
 

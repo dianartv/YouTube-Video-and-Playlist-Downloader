@@ -27,34 +27,6 @@ VIDEO_MODE = "video"
 AUDIO_MODE = "audio"
 
 
-def choose_download_mode(user_choice: str) -> str:
-    choice = user_choice.strip().lower()
-    if choice in {"", "1", "v", "video", "в", "видео"}:
-        return VIDEO_MODE
-
-    if choice in {"2", "a", "audio", "а", "аудио"}:
-        return AUDIO_MODE
-
-    raise ValueError("Введите 1 для видео или 2 для аудио.")
-
-
-def prompt_download_mode(
-    input_func: InputFunc = input,
-    print_func: PrintFunc = print,
-) -> str:
-    print_func("Что скачать?")
-    print_func("1. Видео со звуком")
-    print_func("2. Только аудио (.mp3)")
-
-    while True:
-        try:
-            return choose_download_mode(
-                input_func("Выберите режим или нажмите Enter для видео: ")
-            )
-        except ValueError as exc:
-            print_func(str(exc))
-
-
 def choose_video_resolution(
     available_resolutions: list[int],
     default_resolution: int,
@@ -254,9 +226,13 @@ def download_audio(video: YouTube, config, input_func: InputFunc, print_func: Pr
 
 
 def download_media_interactive(
+    mode: str,
     input_func: InputFunc = input,
     print_func: PrintFunc = print,
 ) -> int:
+    if mode not in {VIDEO_MODE, AUDIO_MODE}:
+        raise ValueError("mode must be video or audio")
+
     configure_file_logger()
     ensure_env_file()
     config = load_config()
@@ -269,7 +245,6 @@ def download_media_interactive(
     try:
         video = YouTube(url=video_url)
         print_func(f"Видео: {video.title}")
-        mode = prompt_download_mode(input_func=input_func, print_func=print_func)
         if mode == AUDIO_MODE:
             return download_audio(
                 video=video,
@@ -294,8 +269,8 @@ def download_video_interactive(
     input_func: InputFunc = input,
     print_func: PrintFunc = print,
 ) -> int:
-    return download_media_interactive(input_func=input_func, print_func=print_func)
-
-
-def main() -> int:
-    return download_media_interactive()
+    return download_media_interactive(
+        mode=VIDEO_MODE,
+        input_func=input_func,
+        print_func=print_func,
+    )

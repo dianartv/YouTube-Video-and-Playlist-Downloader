@@ -79,9 +79,9 @@ def convert_to_mp3(
     result = subprocess.run(
         command,
         capture_output=True,
-        text=True,
     )
     if result.returncode != 0:
-        raise AudioConversionError(result.stderr.strip() or "FFmpeg failed")
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        raise AudioConversionError(stderr or "FFmpeg failed")
 
     return output_path
