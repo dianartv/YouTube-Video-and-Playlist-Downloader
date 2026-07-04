@@ -25,11 +25,14 @@ YouTube URL.
 ```powershell
 uv run python main.py --video
 uv run python main.py --audio
+uv run python main.py --playlist --video
+uv run python main.py --playlist --audio
 ```
 
 Use `--video` to download the best video stream that already includes audio.
 Use `--audio` or `--audio-only` to download the best audio stream and convert it
-to MP3.
+to MP3. Add `--playlist` to process every item from a YouTube playlist. The
+playlist directory name is taken from the YouTube playlist title automatically.
 
 Default values are stored in `.env`:
 
@@ -45,6 +48,13 @@ FULL_AUTO=1
 Downloaded videos are written to `content/`. Audio-only MP3 files are written
 to `content/audio/`. Runtime logs are written to `logs/`. Runtime output
 directories are ignored by Git.
+
+Playlist videos are written to `content/<playlist title>/`. Playlist audio MP3
+files are written to `content/audio/<playlist title>/`.
+
+Finished YouTube live broadcasts are downloaded like regular videos after
+YouTube publishes the archive streams. Active live streams are not downloaded;
+if an ended stream is not available as an archive yet, retry later.
 
 MP3 conversion uses FFmpeg. If `FFMPEG_PATH` is not available on the system
 PATH, the app falls back to the `imageio-ffmpeg` bundled executable. MP3 bitrate

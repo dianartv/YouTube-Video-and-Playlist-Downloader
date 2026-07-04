@@ -1,19 +1,22 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
-from pytubefix.exceptions import VideoUnavailable
+from pytubefix.exceptions import LiveStreamEnded, LiveStreamError, VideoUnavailable
 
-from engine.service.config import ensure_env_file, load_config
 from engine.service.audio import (
     AudioConversionError,
+    choose_mp3_bitrate,
     convert_to_mp3,
     parse_bitrate_kbps,
-    choose_mp3_bitrate,
 )
+from engine.service.config import ensure_env_file, load_config
 from engine.service.logger import configure_file_logger, logger
+from engine.service.tools import make_allowed_format
 from engine.youtube_tools.youtube_tools import (
     DownloadYTAudio,
     DownloadYTVideo,
+    Playlist,
     YouTube,
     get_available_resolutions,
     get_audio_streams,
@@ -25,6 +28,7 @@ InputFunc = Callable[[str], str]
 PrintFunc = Callable[[str], None]
 VIDEO_MODE = "video"
 AUDIO_MODE = "audio"
+DEFAULT_PLAYLIST_DIR_NAME = "playlist"
 
 
 def choose_video_resolution(
@@ -146,6 +150,16 @@ def prompt_audio_stream(
             print_func(str(exc))
 
 
+def make_playlist_directory_name(title: str | None) -> str:
+    name = make_allowed_format(title or "").strip().strip(".")
+    return name or DEFAULT_PLAYLIST_DIR_NAME
+
+
+def get_playlist_output_dir(config, media_mode: str, playlist_title: str | None) -> Path:
+    base_dir = config.audio_download_dir if media_mode == AUDIO_MODE else config.download_dir
+    return Path(base_dir) / make_playlist_directory_name(playlist_title)
+
+
 def download_video(video: YouTube, config, input_func: InputFunc, print_func: PrintFunc) -> int:
     available_resolutions = get_available_resolutions(video, only_with_audio=True)
     if not available_resolutions:
@@ -259,10 +273,109 @@ def download_media_interactive(
             input_func=input_func,
             print_func=print_func,
         )
+    except LiveStreamError:
+        logger.warning(f"Трансляция {video_url} ещё идёт.")
+        print_func("Активные live-трансляции не скачиваются. Дождитесь завершения и публикации архива.")
+        return 1
+    except LiveStreamEnded:
+        logger.warning(f"Архив трансляции {video_url} ещё недоступен.")
+        print_func(
+            "Трансляция завершилась, но YouTube ещё не отдаёт архив как обычное видео. "
+            "Повторите позже."
+        )
+        return 1
     except VideoUnavailable:
         logger.warning(f"Видео {video_url} - недоступно.")
         print_func("Видео недоступно.")
         return 1
+
+
+def download_playlist_interactive(
+    media_mode: str,
+    input_func: InputFunc = input,
+    print_func: PrintFunc = print,
+) -> int:
+    if media_mode not in {VIDEO_MODE, AUDIO_MODE}:
+        raise ValueError("media_mode must be video or audio")
+
+    configure_file_logger()
+    ensure_env_file()
+    config = load_config()
+
+    playlist_url = input_func("Вставьте ссылку на плейлист: ").strip()
+    if not playlist_url:
+        print_func("Ссылка не указана.")
+        return 1
+
+    playlist = Playlist(playlist_url)
+    video_urls = list(playlist.video_urls)
+    if not video_urls:
+        print_func("Плейлист пуст.")
+        return 1
+
+    playlist_title = playlist.title or DEFAULT_PLAYLIST_DIR_NAME
+    playlist_dir = get_playlist_output_dir(config, media_mode, playlist_title)
+    playlist_dir.mkdir(parents=True, exist_ok=True)
+    playlist_config = replace(
+        config,
+        download_dir=playlist_dir,
+        audio_download_dir=playlist_dir,
+    )
+
+    print_func(f"Плейлист: {playlist_title}")
+    print_func(f"Видео в плейлисте: {len(video_urls)}")
+    print_func(f"Каталог плейлиста: {playlist_dir}")
+
+    success_count = 0
+    failed_count = 0
+
+    for index, video_url in enumerate(video_urls, start=1):
+        print_func(f"[{index}/{len(video_urls)}] {video_url}")
+        try:
+            video = YouTube(url=video_url)
+            print_func(f"Видео: {video.title}")
+            if media_mode == AUDIO_MODE:
+                result = download_audio(
+                    video=video,
+                    config=playlist_config,
+                    input_func=input_func,
+                    print_func=print_func,
+                )
+            else:
+                result = download_video(
+                    video=video,
+                    config=playlist_config,
+                    input_func=input_func,
+                    print_func=print_func,
+                )
+        except LiveStreamError:
+            logger.warning(f"Трансляция {video_url} ещё идёт.")
+            print_func("Пропущено: активная live-трансляция.")
+            failed_count += 1
+            continue
+        except LiveStreamEnded:
+            logger.warning(f"Архив трансляции {video_url} ещё недоступен.")
+            print_func("Пропущено: трансляция завершилась, но архив ещё недоступен.")
+            failed_count += 1
+            continue
+        except VideoUnavailable:
+            logger.warning(f"Видео {video_url} - недоступно.")
+            print_func("Пропущено: видео недоступно.")
+            failed_count += 1
+            continue
+        except Exception as exc:
+            logger.exception(f"Не удалось скачать {video_url}: {exc}")
+            print_func(f"Пропущено: ошибка загрузки: {exc}")
+            failed_count += 1
+            continue
+
+        if result == 0:
+            success_count += 1
+        else:
+            failed_count += 1
+
+    print_func(f"Готово. Успешно: {success_count}. Пропущено/ошибок: {failed_count}.")
+    return 0 if failed_count == 0 else 1
 
 
 def download_video_interactive(
