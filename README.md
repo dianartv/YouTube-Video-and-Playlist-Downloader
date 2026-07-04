@@ -68,13 +68,8 @@ to the console. MP4 video streams are copied without re-encoding; non-MP4 video
 streams are transcoded to H.264 before saving the final MP4.
 
 `FULL_AUTO=1` keeps the interaction short: paste a link, choose video or audio,
-then the app downloads the best available video-with-audio or best audio track.
+then the app downloads the best available MP4 video or best audio track.
 Set `FULL_AUTO=0` to choose video quality or audio stream manually.
-
-High-quality YouTube streams can be video-only. The current downloader skips
-those in interactive mode so the saved file has audio. Supporting those
-qualities would require a separate audio download and an FFmpeg/yt-dlp merge
-step.
 
 ## Tests
 

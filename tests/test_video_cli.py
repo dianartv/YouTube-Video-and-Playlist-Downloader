@@ -5,17 +5,15 @@ from unittest.mock import patch
 
 from pytubefix.exceptions import LiveStreamEnded, LiveStreamError
 
+from engine.application.download_audio import download_audio
+from engine.application.download_playlist import download_playlist
+from engine.application.download_video import download_video
+from engine.cli.prompts import prompt_audio_stream, prompt_video_resolution
+from engine.domain.naming import make_playlist_directory_name
+from engine.domain.selection import choose_audio_stream, choose_video_resolution
 from engine.service.config import AppConfig
-from engine.youtube_tools.video_cli import (
-    choose_audio_stream,
-    choose_video_resolution,
-    download_audio,
+from engine.cli.handlers import (
     download_media_interactive,
-    download_playlist_interactive,
-    download_video,
-    make_playlist_directory_name,
-    prompt_audio_stream,
-    prompt_video_resolution,
 )
 
 
@@ -138,19 +136,19 @@ class FullAutoDownloadTests(unittest.TestCase):
 
         with (
             patch(
-                "engine.youtube_tools.video_cli.get_video_streams_no_higher_than",
+                "engine.application.download_video.get_video_streams_no_higher_than",
                 return_value=[video_stream],
             ),
             patch(
-                "engine.youtube_tools.video_cli.get_video_resolutions_no_higher_than",
+                "engine.application.download_video.get_video_resolutions_no_higher_than",
                 return_value=[720],
             ),
             patch(
-                "engine.youtube_tools.video_cli.get_audio_streams",
+                "engine.application.download_video.get_audio_streams",
                 return_value=[audio_stream],
             ),
             patch(
-                "engine.youtube_tools.video_cli.merge_video_and_audio_to_mp4",
+                "engine.application.download_video.merge_video_and_audio_to_mp4",
                 return_value=Path("content/Title.mp4"),
             ) as merge,
         ):
@@ -159,6 +157,8 @@ class FullAutoDownloadTests(unittest.TestCase):
                 config=config,
                 input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=output.append,
+                prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
+                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         self.assertEqual(result, 0)
@@ -187,11 +187,11 @@ class FullAutoDownloadTests(unittest.TestCase):
 
         with (
             patch(
-                "engine.youtube_tools.video_cli.get_audio_streams",
+                "engine.application.download_audio.get_audio_streams",
                 return_value=[stream, FakeAudioStream(140, "128kbps", "mp4")],
             ),
-            patch("engine.youtube_tools.video_cli.DownloadYTAudio") as downloader,
-            patch("engine.youtube_tools.video_cli.convert_to_mp3") as convert,
+            patch("engine.application.download_audio.DownloadYTAudio") as downloader,
+            patch("engine.application.download_audio.convert_to_mp3") as convert,
         ):
             downloader.return_value.download.return_value = "content/audio/audio.webm"
             convert.return_value = Path("content/audio/audio.mp3")
@@ -200,6 +200,7 @@ class FullAutoDownloadTests(unittest.TestCase):
                 config=config,
                 input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=output.append,
+                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         self.assertEqual(result, 0)
@@ -218,11 +219,11 @@ class DownloadMediaInteractiveTests(unittest.TestCase):
     def test_active_live_stream_is_reported_without_traceback(self):
         output = []
 
-        with patch("engine.youtube_tools.video_cli.YouTube") as youtube:
+        with patch("engine.cli.handlers.YouTube") as youtube:
             video = youtube.return_value
             video.title = "Active live"
             with patch(
-                "engine.youtube_tools.video_cli.get_video_streams_no_higher_than",
+                "engine.cli.handlers.run_video_download",
                 side_effect=LiveStreamError("video-id"),
             ):
                 result = download_media_interactive(
@@ -240,11 +241,11 @@ class DownloadMediaInteractiveTests(unittest.TestCase):
     def test_live_stream_ended_is_reported_without_traceback(self):
         output = []
 
-        with patch("engine.youtube_tools.video_cli.YouTube") as youtube:
+        with patch("engine.cli.handlers.YouTube") as youtube:
             video = youtube.return_value
             video.title = "Ended live"
             with patch(
-                "engine.youtube_tools.video_cli.get_video_streams_no_higher_than",
+                "engine.cli.handlers.run_video_download",
                 side_effect=LiveStreamEnded("video-id", "ended"),
             ):
                 result = download_media_interactive(
@@ -282,26 +283,26 @@ class PlaylistDownloadTests(unittest.TestCase):
         )
 
         with (
-            patch("engine.youtube_tools.video_cli.configure_file_logger"),
-            patch("engine.youtube_tools.video_cli.ensure_env_file"),
-            patch("engine.youtube_tools.video_cli.load_config", return_value=config),
-            patch("engine.youtube_tools.video_cli.Playlist", return_value=playlist),
             patch(
-                "engine.youtube_tools.video_cli.YouTube",
+                "engine.application.download_playlist.YouTube",
                 side_effect=[
                     SimpleNamespace(title="One"),
                     SimpleNamespace(title="Two"),
                 ],
             ),
             patch(
-                "engine.youtube_tools.video_cli.download_audio",
+                "engine.application.download_playlist.download_audio",
                 return_value=0,
             ) as download_audio_mock,
         ):
-            result = download_playlist_interactive(
+            result = download_playlist(
+                playlist=playlist,
                 media_mode="audio",
+                config=config,
                 input_func=lambda prompt: "https://youtube.com/playlist?list=123",
                 print_func=output.append,
+                prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
+                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         expected_dir = Path("content/audio") / "MyPlaylist"
@@ -328,23 +329,23 @@ class PlaylistDownloadTests(unittest.TestCase):
         )
 
         with (
-            patch("engine.youtube_tools.video_cli.configure_file_logger"),
-            patch("engine.youtube_tools.video_cli.ensure_env_file"),
-            patch("engine.youtube_tools.video_cli.load_config", return_value=config),
-            patch("engine.youtube_tools.video_cli.Playlist", return_value=playlist),
             patch(
-                "engine.youtube_tools.video_cli.YouTube",
+                "engine.application.download_playlist.YouTube",
                 return_value=SimpleNamespace(title="One"),
             ),
             patch(
-                "engine.youtube_tools.video_cli.download_video",
+                "engine.application.download_playlist.download_video",
                 return_value=0,
             ) as download_video_mock,
         ):
-            result = download_playlist_interactive(
+            result = download_playlist(
+                playlist=playlist,
                 media_mode="video",
+                config=config,
                 input_func=lambda prompt: "https://youtube.com/playlist?list=123",
                 print_func=output.append,
+                prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
+                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
             )
 
         expected_dir = Path("content") / "Videos"

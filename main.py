@@ -1,17 +1,13 @@
 import argparse
 from collections.abc import Sequence
 
-from engine.youtube_tools.video_cli import (
-    AUDIO_MODE,
-    VIDEO_MODE,
-    download_media_interactive,
-    download_playlist_interactive,
-)
+from engine.cli.handlers import download_media_interactive, download_playlist_interactive
+from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Download YouTube video-with-audio or audio-only MP3.",
+        description="Download YouTube MP4 video, audio-only MP3, or playlists.",
     )
     parser.add_argument(
         "--playlist",
@@ -24,7 +20,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_const",
         const=VIDEO_MODE,
         dest="mode",
-        help="download the best video stream that already includes audio",
+        help="download video and audio streams, then merge them to MP4",
     )
     mode.add_argument(
         "--audio",

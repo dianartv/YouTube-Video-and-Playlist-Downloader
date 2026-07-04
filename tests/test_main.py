@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from engine.youtube_tools.video_cli import AUDIO_MODE, VIDEO_MODE
+from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
 from main import main, parse_args
 
 
