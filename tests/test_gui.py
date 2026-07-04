@@ -111,12 +111,11 @@ class GuiTests(unittest.TestCase):
         )
         self.assertEqual(worker_class.call_args.kwargs["mode"], AUDIO_MODE)
 
-    def test_settings_tab_saves_parallel_limits(self):
+    def test_settings_tab_saves_parallel_limits_on_select_change(self):
         window = MainWindow()
         tabs = window.findChild(QTabWidget)
         settings_tab = tabs.widget(3)
-        settings_tab.download_worker_limit_select.setCurrentIndex(5)
-        settings_tab.process_worker_limit_select.setCurrentIndex(2)
+        existing_process_limit = settings_tab.process_worker_limit_value()
         saved_config = AppConfig(
             download_dir=Path("content"),
             audio_download_dir=Path("content/audio"),
@@ -132,11 +131,12 @@ class GuiTests(unittest.TestCase):
             patch("engine.gui.app.save_parallel_limits") as save_parallel_limits,
             patch("engine.gui.app.load_config", return_value=saved_config),
         ):
-            settings_tab.save_settings()
+            settings_tab.download_worker_limit_select.setCurrentIndex(5)
 
-        save_parallel_limits.assert_called_once_with(6, 3)
+        save_parallel_limits.assert_called_once_with(6, existing_process_limit)
         self.assertIs(window.config, saved_config)
-        self.assertEqual(settings_tab.status_label.text(), "Сохранено")
+        self.assertFalse(hasattr(settings_tab, "save_button"))
+        self.assertFalse(hasattr(settings_tab, "status_label"))
 
     def test_download_finish_keeps_thread_until_thread_finished(self):
         window = MainWindow()
@@ -226,7 +226,7 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(audio_tab.download_button.isEnabled())
         self.assertFalse(audio_tab.cancel_button.isEnabled())
         self.assertEqual(audio_tab.status_label.text(), "Отменено")
-        self.assertTrue(audio_tab.show_output_button.isHidden())
+        self.assertFalse(audio_tab.show_output_button.isHidden())
 
     def test_show_output_button_opens_selected_directory(self):
         window = MainWindow()

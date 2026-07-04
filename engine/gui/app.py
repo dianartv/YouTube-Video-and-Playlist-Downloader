@@ -267,7 +267,6 @@ class DownloadTab(QWidget):
 
         self.status_label = QLabel("Ожидание")
         self.show_output_button = QPushButton("Показать")
-        self.show_output_button.hide()
         self.show_output_button.clicked.connect(self.open_output_dir)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -384,7 +383,6 @@ class DownloadTab(QWidget):
         self.log_output.clear()
         self.set_elapsed_time(0)
         self.set_status("Старт")
-        self.show_output_button.hide()
         self.set_progress_busy(True)
         self.download_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -400,17 +398,13 @@ class DownloadTab(QWidget):
         self.cancel_button.setEnabled(False)
         if cancelled:
             self.set_status("Отменено")
-            self.show_output_button.hide()
             self.set_progress_busy(False)
             return
 
         if success:
             self.set_status("Готово")
-            self.show_output_button.show()
             self.set_progress_busy(False)
             self.set_progress(100)
-        else:
-            self.show_output_button.hide()
 
     def append_log(self, message: str) -> None:
         self.log_output.appendPlainText(message)
@@ -472,11 +466,8 @@ class SettingsTab(QWidget):
         self.process_worker_limit_select.setCurrentIndex(
             self._select_index(config.process_worker_limit),
         )
-
-        self.save_button = QPushButton("Сохранить")
-        self.save_button.clicked.connect(self.save_settings)
-
-        self.status_label = QLabel("Ожидание")
+        self.download_worker_limit_select.currentIndexChanged.connect(self.save_settings)
+        self.process_worker_limit_select.currentIndexChanged.connect(self.save_settings)
         self._build_layout()
 
     def _build_layout(self) -> None:
@@ -488,18 +479,12 @@ class SettingsTab(QWidget):
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(10)
         form.addWidget(self.group_title, 0, 0, 1, 2)
-        form.addWidget(QLabel("Лимит для скачивания"), 1, 0)
+        form.addWidget(QLabel("Параллельных скачиваний"), 1, 0)
         form.addWidget(self.download_worker_limit_select, 1, 1)
-        form.addWidget(QLabel("Лимит для одновременной обработки"), 2, 0)
+        form.addWidget(QLabel("Параллельных конвертаций"), 2, 0)
         form.addWidget(self.process_worker_limit_select, 2, 1)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(10)
-        buttons.addWidget(self.save_button)
-        buttons.addWidget(self.status_label, stretch=1)
-
         root.addLayout(form)
-        root.addLayout(buttons)
         root.addStretch(1)
 
     def download_worker_limit_value(self) -> int:
@@ -508,13 +493,12 @@ class SettingsTab(QWidget):
     def process_worker_limit_value(self) -> int:
         return int(self.process_worker_limit_select.currentData())
 
-    def save_settings(self) -> None:
+    def save_settings(self, *_args) -> None:
         save_parallel_limits(
             self.download_worker_limit_value(),
             self.process_worker_limit_value(),
         )
         self.parent_window.config = load_config()
-        self.status_label.setText("Сохранено")
 
     def _select_index(self, value: int) -> int:
         return max(
