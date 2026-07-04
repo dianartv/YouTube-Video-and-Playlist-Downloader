@@ -116,9 +116,13 @@ class DownloadYTAudio:
     def __init__(self, video: YouTube) -> None:
         self.video = video
 
-    def download(self, stream, save_to: str) -> str:
+    def download(self, stream, save_to: str, filename: str | None = None) -> str:
         """Загрузка выбранного audio-only stream."""
-        return stream.download(output_path=save_to)
+        kwargs = {"output_path": save_to}
+        if filename is not None:
+            kwargs["filename"] = filename
+
+        return stream.download(**kwargs)
 
 
 class DownloadYTPlaylist:
@@ -166,6 +170,65 @@ def get_video_only_resolutions(video: YouTube) -> list[int]:
     ]
 
 
+def get_video_streams_no_higher_than(video: YouTube, max_resolution: int) -> list:
+    streams = [
+        stream
+        for stream in video.get_video_stream_format_codes(
+            only_video=True,
+            only_with_audio=False,
+            sorted_by_itag=False,
+            sorted_by_resolution=False,
+        )
+        if _stream_resolution_value(stream) is not None
+        and _stream_resolution_value(stream) <= max_resolution
+    ]
+
+    return sorted(
+        streams,
+        key=lambda stream: (
+            _stream_resolution_value(stream) or 0,
+            int(getattr(stream, "subtype", "") == "mp4"),
+            _stream_fps_value(stream),
+            getattr(stream, "itag", 0),
+        ),
+        reverse=True,
+    )
+
+
+def get_video_resolutions_no_higher_than(video: YouTube, max_resolution: int) -> list[int]:
+    resolutions = []
+    for stream in get_video_streams_no_higher_than(video, max_resolution):
+        resolution = _stream_resolution_value(stream)
+        if resolution is not None and resolution not in resolutions:
+            resolutions.append(resolution)
+
+    return resolutions
+
+
+def get_best_video_stream_no_higher_than(video: YouTube, max_resolution: int):
+    streams = get_video_streams_no_higher_than(video, max_resolution)
+    if not streams:
+        raise ItagDoesNotExist(
+            f'У видео нет видеопотоков не выше {max_resolution}p.'
+        )
+
+    return streams[0]
+
+
+def get_best_video_stream_for_resolution(video_streams: list, resolution: int):
+    matching_streams = [
+        stream
+        for stream in video_streams
+        if _stream_resolution_value(stream) == resolution
+    ]
+    if not matching_streams:
+        raise ItagDoesNotExist(
+            f'У видео нет видеопотока для {resolution}p.'
+        )
+
+    return matching_streams[0]
+
+
 def get_audio_streams(video: YouTube) -> list:
     streams = [
         stream
@@ -202,3 +265,21 @@ def get_resolution_itag(resolution: int, video: YouTube, only_with_audio=True) -
             logger.warning(f'Разрешение {resolution} недоступно.')
         logger.info(f'Установлено лучшее доступное качество.')
     return itag
+
+
+def _stream_resolution_value(stream) -> int | None:
+    resolution = getattr(stream, "resolution", None)
+    if resolution is None:
+        return None
+
+    try:
+        return int(str(resolution).removesuffix("p"))
+    except ValueError:
+        return None
+
+
+def _stream_fps_value(stream) -> int:
+    try:
+        return int(getattr(stream, "fps", 0) or 0)
+    except (TypeError, ValueError):
+        return 0

@@ -13,14 +13,15 @@ from engine.service.audio import (
 from engine.service.config import ensure_env_file, load_config
 from engine.service.logger import configure_file_logger, logger
 from engine.service.tools import make_allowed_format
+from engine.service.video import VideoMergeError, merge_video_and_audio_to_mp4
 from engine.youtube_tools.youtube_tools import (
     DownloadYTAudio,
-    DownloadYTVideo,
     Playlist,
     YouTube,
-    get_available_resolutions,
     get_audio_streams,
-    get_video_only_resolutions,
+    get_best_video_stream_for_resolution,
+    get_video_resolutions_no_higher_than,
+    get_video_streams_no_higher_than,
 )
 
 
@@ -69,7 +70,7 @@ def prompt_video_resolution(
     input_func: InputFunc = input,
     print_func: PrintFunc = print,
 ) -> int:
-    print_func("Доступное качество со звуком:")
+    print_func("Доступное качество видео:")
     for index, resolution in enumerate(available_resolutions, start=1):
         print_func(f"{index}. {resolution}p")
 
@@ -160,32 +161,129 @@ def get_playlist_output_dir(config, media_mode: str, playlist_title: str | None)
     return Path(base_dir) / make_playlist_directory_name(playlist_title)
 
 
+def make_video_file_stem(title: str | None) -> str:
+    name = make_allowed_format(title or "").strip().strip(".")
+    return name or "video"
+
+
+def describe_video_stream(stream) -> str:
+    resolution = getattr(stream, "resolution", "unknown")
+    subtype = getattr(stream, "subtype", "unknown")
+    itag = getattr(stream, "itag", "unknown")
+    fps = getattr(stream, "fps", None)
+    fps_text = f", {fps}fps" if fps else ""
+    return f"{resolution} {subtype}{fps_text} (itag {itag})"
+
+
+def describe_audio_stream(stream, max_bitrate_kbps: int) -> str:
+    source_bitrate = parse_bitrate_kbps(getattr(stream, "abr", None))
+    target_bitrate = choose_mp3_bitrate(source_bitrate, max_bitrate_kbps)
+    subtype = getattr(stream, "subtype", "unknown")
+    itag = getattr(stream, "itag", "unknown")
+    return f"{stream.abr} {subtype} (itag {itag}, AAC {target_bitrate}kbps)"
+
+
 def download_video(video: YouTube, config, input_func: InputFunc, print_func: PrintFunc) -> int:
-    available_resolutions = get_available_resolutions(video, only_with_audio=True)
-    if not available_resolutions:
-        print_func("Не удалось получить список качеств со звуком.")
+    video_streams = get_video_streams_no_higher_than(
+        video,
+        max_resolution=config.default_video_quality,
+    )
+    if not video_streams:
+        print_func(
+            f"Не удалось получить видеопотоки не выше {config.default_video_quality}p."
+        )
         return 1
 
-    video_only_resolutions = get_video_only_resolutions(video)
+    audio_streams = get_audio_streams(video)
+    if not audio_streams:
+        print_func("Не удалось получить список аудио-дорожек.")
+        return 1
+
+    available_resolutions = get_video_resolutions_no_higher_than(
+        video,
+        max_resolution=config.default_video_quality,
+    )
     if config.full_auto:
-        resolution = available_resolutions[0]
-        print_func(f"Full auto: выбрано лучшее качество со звуком {resolution}p.")
-        if video_only_resolutions:
-            values = ", ".join(f"{value}p" for value in video_only_resolutions)
-            print_func(f"Без аудио, пропущено: {values}")
+        video_stream = video_streams[0]
+        audio_stream = audio_streams[0]
+        print_func(
+            "Full auto: выбрано лучшее видео "
+            f"не выше {config.default_video_quality}p: {describe_video_stream(video_stream)}."
+        )
+        print_func(
+            f"Full auto: выбрана лучшая аудио-дорожка: "
+            f"{describe_audio_stream(audio_stream, config.default_mp3_bitrate)}."
+        )
     else:
         resolution = prompt_video_resolution(
             available_resolutions=available_resolutions,
             default_resolution=config.default_video_quality,
-            video_only_resolutions=video_only_resolutions,
+            input_func=input_func,
+            print_func=print_func,
+        )
+        video_stream = get_best_video_stream_for_resolution(video_streams, resolution)
+        audio_stream = prompt_audio_stream(
+            audio_streams=audio_streams,
+            max_mp3_bitrate=config.default_mp3_bitrate,
             input_func=input_func,
             print_func=print_func,
         )
 
     save_to = Path(config.download_dir)
     save_to.mkdir(parents=True, exist_ok=True)
-    DownloadYTVideo(video=video).download(resolution=resolution, save_to=str(save_to))
-    print_func(f"Готово. Видео сохранено в {config.download_dir}.")
+
+    title = getattr(video, "title", None)
+    output_path = save_to / f"{make_video_file_stem(title)}.mp4"
+    temp_dir = save_to / ".tmp" / (make_allowed_format(getattr(video, "video_id", "") or "") or make_video_file_stem(title))
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    video_filename = f"video.{getattr(video_stream, 'subtype', 'bin')}"
+    audio_filename = f"audio.{getattr(audio_stream, 'subtype', 'bin')}"
+    print_func(f"Скачиваю видео-поток: {describe_video_stream(video_stream)}")
+    video_path = Path(video_stream.download(output_path=str(temp_dir), filename=video_filename))
+    print_func(f"Видео-поток сохранён: {video_path}")
+
+    print_func(f"Скачиваю аудио-дорожку: {describe_audio_stream(audio_stream, config.default_mp3_bitrate)}")
+    audio_path = Path(
+        DownloadYTAudio(video=video).download(
+            stream=audio_stream,
+            save_to=str(temp_dir),
+            filename=audio_filename,
+        )
+    )
+    print_func(f"Аудио-дорожка сохранена: {audio_path}")
+
+    transcode_video = getattr(video_stream, "subtype", None) != "mp4"
+    if transcode_video:
+        print_func("Видео-поток не MP4: FFmpeg перекодирует видео в H.264.")
+    else:
+        print_func("Видео-поток MP4: FFmpeg скопирует видео без перекодирования.")
+
+    source_audio_bitrate = parse_bitrate_kbps(getattr(audio_stream, "abr", None))
+    try:
+        merged_path = merge_video_and_audio_to_mp4(
+            video_path=video_path,
+            audio_path=audio_path,
+            output_path=output_path,
+            source_audio_bitrate_kbps=source_audio_bitrate,
+            max_audio_bitrate_kbps=config.default_mp3_bitrate,
+            ffmpeg_path=config.ffmpeg_path,
+            transcode_video=transcode_video,
+            duration_seconds=getattr(video, "length", None),
+            progress_callback=print_func,
+        )
+    except VideoMergeError as exc:
+        logger.warning(f"Не удалось склеить видео и аудио в MP4: {exc}")
+        print_func(f"Видео и аудио скачаны, но MP4 не собран: {exc}")
+        return 1
+
+    for path in (video_path, audio_path):
+        if path.exists():
+            path.unlink()
+    if temp_dir.exists() and not any(temp_dir.iterdir()):
+        temp_dir.rmdir()
+
+    print_func(f"Готово. MP4 сохранён в {merged_path}.")
     return 0
 
 

@@ -29,10 +29,12 @@ uv run python main.py --playlist --video
 uv run python main.py --playlist --audio
 ```
 
-Use `--video` to download the best video stream that already includes audio.
-Use `--audio` or `--audio-only` to download the best audio stream and convert it
-to MP3. Add `--playlist` to process every item from a YouTube playlist. The
-playlist directory name is taken from the YouTube playlist title automatically.
+Use `--video` to download the best video stream not higher than
+`DEFAULT_VIDEO_QUALITY`, download the best audio stream separately, and merge
+them into an MP4 file with FFmpeg. Use `--audio` or `--audio-only` to download
+the best audio stream and convert it to MP3. Add `--playlist` to process every
+item from a YouTube playlist. The playlist directory name is taken from the
+YouTube playlist title automatically.
 
 Default values are stored in `.env`:
 
@@ -60,6 +62,10 @@ MP3 conversion uses FFmpeg. If `FFMPEG_PATH` is not available on the system
 PATH, the app falls back to the `imageio-ffmpeg` bundled executable. MP3 bitrate
 is capped at the downloaded audio bitrate; if the source bitrate is unknown,
 `DEFAULT_MP3_BITRATE` is used.
+
+Video mode also uses FFmpeg. During MP4 assembly the app prints FFmpeg progress
+to the console. MP4 video streams are copied without re-encoding; non-MP4 video
+streams are transcoded to H.264 before saving the final MP4.
 
 `FULL_AUTO=1` keeps the interaction short: paste a link, choose video or audio,
 then the app downloads the best available video-with-audio or best audio track.

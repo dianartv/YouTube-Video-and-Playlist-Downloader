@@ -9,7 +9,11 @@ from engine.youtube_tools.youtube_tools import (
     get_available_resolutions,
     get_audio_streams,
     get_best_audio_stream,
+    get_best_video_stream_for_resolution,
+    get_best_video_stream_no_higher_than,
     get_resolution_itag,
+    get_video_resolutions_no_higher_than,
+    get_video_streams_no_higher_than,
     get_video_only_resolutions,
 )
 
@@ -18,10 +22,10 @@ class FakeStream:
     def __init__(self):
         self.saved_to = None
 
-    def download(self, save_to=None, output_path=None):
+    def download(self, save_to=None, output_path=None, filename=None):
         save_to = output_path or save_to
-        self.saved_to = save_to
-        return f"{save_to}/audio.webm"
+        self.saved_to = f"{save_to}/{filename}" if filename else save_to
+        return f"{save_to}/{filename or 'audio.webm'}"
 
 
 class FakeStreams:
@@ -59,6 +63,7 @@ class FakeFormatStream:
         includes_audio_track=False,
         abr=None,
         subtype="mp4",
+        fps=30,
     ):
         self.itag = itag
         self.resolution = resolution
@@ -66,6 +71,7 @@ class FakeFormatStream:
         self.includes_audio_track = includes_audio_track
         self.abr = abr
         self.subtype = subtype
+        self.fps = fps
 
 
 class FakeVideoWithStreams:
@@ -239,6 +245,66 @@ class AudioStreamTests(unittest.TestCase):
         )
 
         self.assertEqual(get_best_audio_stream(fake_video).itag, 251)
+
+
+class VideoStreamSelectionTests(unittest.TestCase):
+    def test_get_video_streams_no_higher_than_filters_by_env_limit(self):
+        fake_video = FakeVideoWithStreams(
+            [
+                FakeFormatStream(137, "1080p", subtype="mp4"),
+                FakeFormatStream(136, "720p", subtype="mp4"),
+                FakeFormatStream(244, "480p", subtype="webm"),
+                FakeFormatStream(140, None, "audio", True, "128kbps"),
+            ]
+        )
+
+        streams = get_video_streams_no_higher_than(fake_video, max_resolution=720)
+
+        self.assertEqual([stream.itag for stream in streams], [136, 244])
+
+    def test_get_video_streams_no_higher_than_prefers_mp4_at_same_resolution(self):
+        fake_video = FakeVideoWithStreams(
+            [
+                FakeFormatStream(248, "1080p", subtype="webm"),
+                FakeFormatStream(137, "1080p", subtype="mp4"),
+                FakeFormatStream(136, "720p", subtype="mp4"),
+            ]
+        )
+
+        best_stream = get_best_video_stream_no_higher_than(
+            fake_video,
+            max_resolution=1080,
+        )
+
+        self.assertEqual(best_stream.itag, 137)
+
+    def test_get_video_resolutions_no_higher_than_returns_unique_values(self):
+        fake_video = FakeVideoWithStreams(
+            [
+                FakeFormatStream(137, "1080p", subtype="mp4"),
+                FakeFormatStream(248, "1080p", subtype="webm"),
+                FakeFormatStream(136, "720p", subtype="mp4"),
+            ]
+        )
+
+        resolutions = get_video_resolutions_no_higher_than(
+            fake_video,
+            max_resolution=1080,
+        )
+
+        self.assertEqual(resolutions, [1080, 720])
+
+    def test_get_best_video_stream_for_resolution_returns_sorted_match(self):
+        streams = [
+            FakeFormatStream(248, "1080p", subtype="webm"),
+            FakeFormatStream(137, "1080p", subtype="mp4"),
+        ]
+        fake_video = FakeVideoWithStreams(streams)
+        sorted_streams = get_video_streams_no_higher_than(fake_video, 1080)
+
+        stream = get_best_video_stream_for_resolution(sorted_streams, 1080)
+
+        self.assertEqual(stream.itag, 137)
 
 
 if __name__ == "__main__":

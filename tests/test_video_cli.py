@@ -24,6 +24,24 @@ class FakeAudioStream:
         self.itag = itag
         self.abr = abr
         self.subtype = subtype
+        self.saved_to = None
+
+    def download(self, output_path=None, filename=None):
+        self.saved_to = Path(output_path) / filename
+        return str(self.saved_to)
+
+
+class FakeVideoStream:
+    def __init__(self, itag, resolution, subtype="mp4", fps=30):
+        self.itag = itag
+        self.resolution = resolution
+        self.subtype = subtype
+        self.fps = fps
+        self.saved_to = None
+
+    def download(self, output_path=None, filename=None):
+        self.saved_to = Path(output_path) / filename
+        return str(self.saved_to)
 
 
 class ChooseVideoResolutionTests(unittest.TestCase):
@@ -105,38 +123,57 @@ class PromptAudioStreamTests(unittest.TestCase):
 
 
 class FullAutoDownloadTests(unittest.TestCase):
-    def test_full_auto_video_uses_best_available_resolution(self):
+    def test_full_auto_video_downloads_video_and_audio_then_merges_mp4(self):
         output = []
+        video_stream = FakeVideoStream(137, "720p", "mp4")
+        audio_stream = FakeAudioStream(251, "160kbps", "webm")
         config = SimpleNamespace(
             full_auto=True,
             download_dir=Path("content"),
             default_video_quality=720,
+            default_mp3_bitrate=320,
+            ffmpeg_path="ffmpeg",
         )
+        video = SimpleNamespace(title="Title", video_id="abc123", length=100)
 
         with (
             patch(
-                "engine.youtube_tools.video_cli.get_available_resolutions",
-                return_value=[1080, 720],
+                "engine.youtube_tools.video_cli.get_video_streams_no_higher_than",
+                return_value=[video_stream],
             ),
             patch(
-                "engine.youtube_tools.video_cli.get_video_only_resolutions",
-                return_value=[1440],
+                "engine.youtube_tools.video_cli.get_video_resolutions_no_higher_than",
+                return_value=[720],
             ),
-            patch("engine.youtube_tools.video_cli.DownloadYTVideo") as downloader,
+            patch(
+                "engine.youtube_tools.video_cli.get_audio_streams",
+                return_value=[audio_stream],
+            ),
+            patch(
+                "engine.youtube_tools.video_cli.merge_video_and_audio_to_mp4",
+                return_value=Path("content/Title.mp4"),
+            ) as merge,
         ):
             result = download_video(
-                video=object(),
+                video=video,
                 config=config,
                 input_func=lambda prompt: self.fail("input should not be called"),
                 print_func=output.append,
             )
 
         self.assertEqual(result, 0)
-        downloader.return_value.download.assert_called_once_with(
-            resolution=1080,
-            save_to=str(Path("content")),
+        self.assertEqual(video_stream.saved_to, Path("content/.tmp/abc123/video.mp4"))
+        self.assertEqual(audio_stream.saved_to, Path("content/.tmp/abc123/audio.webm"))
+        merge.assert_called_once()
+        self.assertEqual(merge.call_args.kwargs["video_path"], video_stream.saved_to)
+        self.assertEqual(merge.call_args.kwargs["audio_path"], audio_stream.saved_to)
+        self.assertEqual(merge.call_args.kwargs["output_path"], Path("content/Title.mp4"))
+        self.assertFalse(merge.call_args.kwargs["transcode_video"])
+        self.assertIn(
+            "Full auto: выбрано лучшее видео не выше 720p: 720p mp4, 30fps (itag 137).",
+            output,
         )
-        self.assertIn("Full auto: выбрано лучшее качество со звуком 1080p.", output)
+        self.assertIn("Готово. MP4 сохранён в content\\Title.mp4.", output)
 
     def test_full_auto_audio_uses_best_audio_stream(self):
         output = []
@@ -185,7 +222,7 @@ class DownloadMediaInteractiveTests(unittest.TestCase):
             video = youtube.return_value
             video.title = "Active live"
             with patch(
-                "engine.youtube_tools.video_cli.get_available_resolutions",
+                "engine.youtube_tools.video_cli.get_video_streams_no_higher_than",
                 side_effect=LiveStreamError("video-id"),
             ):
                 result = download_media_interactive(
@@ -207,7 +244,7 @@ class DownloadMediaInteractiveTests(unittest.TestCase):
             video = youtube.return_value
             video.title = "Ended live"
             with patch(
-                "engine.youtube_tools.video_cli.get_available_resolutions",
+                "engine.youtube_tools.video_cli.get_video_streams_no_higher_than",
                 side_effect=LiveStreamEnded("video-id", "ended"),
             ):
                 result = download_media_interactive(
