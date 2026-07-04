@@ -1,9 +1,11 @@
 import unittest
+from types import SimpleNamespace
 
 from engine.errors.errors_handler import ItagDoesNotExist
 from engine.youtube_tools.youtube_tools import (
     DownloadYTAudio,
     YouTube,
+    download_stream,
     get_audio_streams,
     get_best_video_stream_for_resolution,
     get_best_video_stream_no_higher_than,
@@ -23,6 +25,18 @@ class FakeStream:
         save_to = output_path or save_to
         self.saved_to = f"{save_to}/{filename}" if filename else save_to
         return f"{save_to}/{filename or 'audio.webm'}"
+
+
+class FakeProgressStream:
+    filesize = 100
+
+    def __init__(self, video):
+        self.video = video
+
+    def download(self, output_path=None, filename=None, interrupt_checker=None):
+        self.video.stream_monostate.on_progress(self, b"chunk", 75)
+        self.video.stream_monostate.on_progress(self, b"chunk", 25)
+        return f"{output_path}/{filename}"
 
 
 class FakeFormatStream:
@@ -100,6 +114,28 @@ class DownloadYTAudioTests(unittest.TestCase):
 
         self.assertEqual(result, "content/audio/audio.webm")
         self.assertEqual(stream.saved_to, "content/audio/audio.webm")
+
+    def test_download_stream_reports_percent_progress_and_restores_callback(self):
+        old_callback = object()
+        video = SimpleNamespace(stream_monostate=SimpleNamespace(on_progress=old_callback))
+
+        def register_on_progress_callback(callback):
+            video.stream_monostate.on_progress = callback
+
+        video.register_on_progress_callback = register_on_progress_callback
+        progress = []
+
+        result = download_stream(
+            video=video,
+            stream=FakeProgressStream(video),
+            save_to="content/audio",
+            filename="audio.webm",
+            progress_callback=progress.append,
+        )
+
+        self.assertEqual(result, "content/audio/audio.webm")
+        self.assertEqual(progress, [0, 25, 75, 100])
+        self.assertIs(video.stream_monostate.on_progress, old_callback)
 
 
 class AudioStreamTests(unittest.TestCase):

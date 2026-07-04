@@ -9,6 +9,7 @@ from engine.application.download_duplicates import (
     should_download_record,
 )
 from engine.application.formatters import describe_mp3_audio_stream
+from engine.application.progress import ProgressFunc, ffmpeg_progress_adapter
 from engine.domain.download_history import DownloadHistory, DownloadRecord
 from engine.domain.modes import AUDIO_MODE
 from engine.domain.naming import make_video_file_stem
@@ -38,6 +39,7 @@ def download_audio(
     download_history: DownloadHistory | None = None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None = None,
     processing_limiter: ContextManager | None = None,
+    progress_callback: ProgressFunc | None = None,
 ) -> int:
     if cancel_token is not None:
         cancel_token.raise_if_cancelled()
@@ -97,6 +99,7 @@ def download_audio(
         save_to=str(save_to),
         filename=source_filename,
         interrupt_checker=cancel_token.is_cancelled if cancel_token is not None else None,
+        progress_callback=progress_callback,
     )
     if downloaded is None:
         raise OperationCancelled("Скачивание аудио отменено.")
@@ -122,6 +125,8 @@ def download_audio(
                 max_bitrate_kbps=config.default_mp3_bitrate,
                 ffmpeg_path=config.ffmpeg_path,
                 cancel_token=cancel_token,
+                duration_seconds=getattr(video, "length", None),
+                progress_callback=ffmpeg_progress_adapter(progress_callback),
             )
     except AudioConversionError as exc:
         logger.warning(f"Не удалось сконвертировать аудио в MP3: {exc}")

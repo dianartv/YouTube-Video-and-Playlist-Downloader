@@ -7,6 +7,7 @@ from engine.application.download_duplicates import (
     should_download_record,
 )
 from engine.application.formatters import describe_aac_audio_stream, describe_video_stream
+from engine.application.progress import ProgressFunc, ffmpeg_progress_adapter
 from engine.domain.download_history import DownloadHistory, DownloadRecord
 from engine.domain.modes import VIDEO_MODE
 from engine.domain.naming import make_safe_path_name, make_video_file_stem
@@ -17,6 +18,7 @@ from engine.service.video import VideoMergeError, merge_video_and_audio_to_mp4
 from engine.youtube_tools.youtube_tools import (
     DownloadYTAudio,
     YouTube,
+    download_stream,
     get_audio_streams,
     get_best_video_stream_for_resolution,
     get_video_resolutions_no_higher_than,
@@ -40,6 +42,7 @@ def download_video(
     cancel_token: CancellationToken | None = None,
     download_history: DownloadHistory | None = None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None = None,
+    progress_callback: ProgressFunc | None = None,
 ) -> int:
     if cancel_token is not None:
         cancel_token.raise_if_cancelled()
@@ -135,10 +138,13 @@ def download_video(
     if cancel_token is not None:
         cancel_token.register_path(expected_video_path)
 
-    downloaded_video = video_stream.download(
-        output_path=str(temp_dir),
+    downloaded_video = download_stream(
+        video=video,
+        stream=video_stream,
+        save_to=str(temp_dir),
         filename=video_filename,
         interrupt_checker=cancel_token.is_cancelled if cancel_token is not None else None,
+        progress_callback=progress_callback,
     )
     if downloaded_video is None:
         raise OperationCancelled("Скачивание видео отменено.")
@@ -162,6 +168,7 @@ def download_video(
         save_to=str(temp_dir),
         filename=audio_filename,
         interrupt_checker=cancel_token.is_cancelled if cancel_token is not None else None,
+        progress_callback=progress_callback,
     )
     if downloaded_audio is None:
         raise OperationCancelled("Скачивание аудио отменено.")
@@ -182,6 +189,7 @@ def download_video(
         cancel_token.register_path(output_path)
 
     try:
+        print_func("Собираю MP4.")
         merged_path = merge_video_and_audio_to_mp4(
             video_path=video_path,
             audio_path=audio_path,
@@ -191,7 +199,7 @@ def download_video(
             ffmpeg_path=config.ffmpeg_path,
             transcode_video=transcode_video,
             duration_seconds=getattr(video, "length", None),
-            progress_callback=print_func,
+            progress_callback=ffmpeg_progress_adapter(progress_callback),
             cancel_token=cancel_token,
         )
     except VideoMergeError as exc:

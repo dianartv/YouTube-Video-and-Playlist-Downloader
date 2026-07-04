@@ -1,8 +1,13 @@
+from collections.abc import Callable
+
 from pytubefix import YouTube as PyYT
 from pytubefix import Playlist
 
 from engine.errors.errors_handler import ItagDoesNotExist
 from engine.service.audio import parse_bitrate_kbps
+
+
+DownloadProgressFunc = Callable[[int], None]
 
 
 class YouTube(PyYT):
@@ -79,15 +84,64 @@ class DownloadYTAudio:
         save_to: str,
         filename: str | None = None,
         interrupt_checker=None,
+        progress_callback: DownloadProgressFunc | None = None,
     ) -> str | None:
         """Загрузка выбранного audio-only stream."""
-        kwargs = {"output_path": save_to}
-        if filename is not None:
-            kwargs["filename"] = filename
-        if interrupt_checker is not None:
-            kwargs["interrupt_checker"] = interrupt_checker
+        return download_stream(
+            video=self.video,
+            stream=stream,
+            save_to=save_to,
+            filename=filename,
+            interrupt_checker=interrupt_checker,
+            progress_callback=progress_callback,
+        )
 
+
+def download_stream(
+    *,
+    video: YouTube,
+    stream,
+    save_to: str,
+    filename: str | None = None,
+    interrupt_checker=None,
+    progress_callback: DownloadProgressFunc | None = None,
+) -> str | None:
+    kwargs = {"output_path": save_to}
+    if filename is not None:
+        kwargs["filename"] = filename
+    if interrupt_checker is not None:
+        kwargs["interrupt_checker"] = interrupt_checker
+
+    if progress_callback is None:
         return stream.download(**kwargs)
+
+    previous_callback = getattr(video.stream_monostate, "on_progress", None)
+    last_percent = -1
+
+    def on_progress(current_stream, _chunk: bytes, bytes_remaining: int) -> None:
+        nonlocal last_percent
+
+        filesize = int(getattr(current_stream, "filesize", 0) or 0)
+        if filesize <= 0:
+            return
+
+        downloaded = max(0, filesize - int(bytes_remaining))
+        percent = min(100, max(0, int(downloaded / filesize * 100)))
+        if percent == 100 or percent > last_percent:
+            last_percent = percent
+            progress_callback(percent)
+
+    progress_callback(0)
+    video.register_on_progress_callback(on_progress)
+    try:
+        result = stream.download(**kwargs)
+    finally:
+        video.register_on_progress_callback(previous_callback)
+
+    if result is not None:
+        progress_callback(100)
+
+    return result
 
 
 def get_video_streams_no_higher_than(video: YouTube, max_resolution: int) -> list:

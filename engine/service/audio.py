@@ -1,6 +1,7 @@
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -10,6 +11,9 @@ from engine.service.cancellation import CancellationToken, OperationCancelled
 
 class AudioConversionError(RuntimeError):
     pass
+
+
+ProgressFunc = Callable[[str], None]
 
 
 def parse_bitrate_kbps(value: str | None) -> int | None:
@@ -55,6 +59,8 @@ def convert_to_mp3(
     max_bitrate_kbps: int = 320,
     ffmpeg_path: str = "ffmpeg",
     cancel_token: CancellationToken | None = None,
+    duration_seconds: int | float | None = None,
+    progress_callback: ProgressFunc | None = None,
 ) -> Path:
     input_path = Path(input_path)
     output_path = Path(output_path)
@@ -69,9 +75,13 @@ def convert_to_mp3(
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    should_stream_progress = cancel_token is not None or progress_callback is not None
     command = [
         resolve_ffmpeg_executable(ffmpeg_path),
         "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-i",
         str(input_path),
         "-vn",
@@ -79,10 +89,19 @@ def convert_to_mp3(
         "libmp3lame",
         "-b:a",
         f"{bitrate}k",
-        str(output_path),
     ]
-    if cancel_token is not None:
-        return _run_cancellable_ffmpeg(command, output_path, cancel_token)
+    if should_stream_progress:
+        command.extend(["-progress", "pipe:1", "-nostats"])
+    command.append(str(output_path))
+
+    if should_stream_progress:
+        return _run_ffmpeg_with_progress(
+            command=command,
+            output_path=output_path,
+            duration_seconds=duration_seconds,
+            progress_callback=progress_callback,
+            cancel_token=cancel_token,
+        )
 
     result = subprocess.run(command, capture_output=True)
     if result.returncode != 0:
@@ -92,39 +111,80 @@ def convert_to_mp3(
     return output_path
 
 
-def _run_cancellable_ffmpeg(
+def _run_ffmpeg_with_progress(
+    *,
     command: list[str],
     output_path: Path,
-    cancel_token: CancellationToken,
+    duration_seconds: int | float | None,
+    progress_callback: ProgressFunc | None,
+    cancel_token: CancellationToken | None,
 ) -> Path:
+    _emit_progress(progress_callback, "FFmpeg: старт конвертации в MP3.")
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
     )
-    cancel_token.register_process(process)
+    if cancel_token is not None:
+        cancel_token.register_process(process)
+
+    output_lines: list[str] = []
+    last_percent = -1
     try:
-        while True:
-            if cancel_token.is_cancelled():
-                _terminate_process(process)
-                raise OperationCancelled("Конвертация MP3 отменена.")
+        if process.stdout is not None:
+            for raw_line in process.stdout:
+                if cancel_token is not None and cancel_token.is_cancelled():
+                    _terminate_process(process)
+                    raise OperationCancelled("Конвертация MP3 отменена.")
 
-            try:
-                stdout, stderr = process.communicate(timeout=0.1)
-                break
-            except subprocess.TimeoutExpired:
-                pass
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+
+                key, separator, value = line.partition("=")
+                if separator != "=":
+                    output_lines.append(line)
+                    continue
+
+                if key == "out_time_ms":
+                    percent = _progress_percent(value, duration_seconds)
+                    if percent is not None and (percent == 100 or percent >= last_percent + 5):
+                        _emit_progress(progress_callback, f"FFmpeg: {percent}%")
+                        last_percent = percent
+                elif key == "progress" and value == "end" and last_percent < 100:
+                    _emit_progress(progress_callback, "FFmpeg: 100%")
+
+        return_code = process.wait()
     finally:
-        cancel_token.unregister_process(process)
+        if cancel_token is not None:
+            cancel_token.unregister_process(process)
 
-    if cancel_token.is_cancelled():
+    if cancel_token is not None and cancel_token.is_cancelled():
         raise OperationCancelled("Конвертация MP3 отменена.")
 
-    if process.returncode != 0:
-        message = stderr.decode("utf-8", errors="replace").strip()
-        raise AudioConversionError(message or "FFmpeg failed")
+    if return_code != 0:
+        message = "\n".join(output_lines[-20:]).strip()
+        raise AudioConversionError(message or f"FFmpeg failed with exit code {return_code}")
 
+    _emit_progress(progress_callback, f"FFmpeg: файл сохранён: {output_path}")
     return output_path
+
+
+def _progress_percent(value: str, duration_seconds: int | float | None) -> int | None:
+    if not duration_seconds:
+        return None
+
+    try:
+        out_time_seconds = int(value) / 1_000_000
+    except ValueError:
+        return None
+
+    return min(100, max(0, int(out_time_seconds / float(duration_seconds) * 100)))
+
+
+def _emit_progress(progress_callback: ProgressFunc | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
 
 
 def _terminate_process(process: subprocess.Popen) -> None:

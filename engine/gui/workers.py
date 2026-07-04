@@ -138,6 +138,7 @@ class DownloadWorker(QObject):
                 cancel_token=self.cancel_token,
                 download_history=download_history,
                 confirm_overwrite_func=self._confirm_overwrite,
+                progress_callback=self._set_progress,
             )
 
         if self.mode == AUDIO_MODE:
@@ -150,6 +151,7 @@ class DownloadWorker(QObject):
                 cancel_token=self.cancel_token,
                 download_history=download_history,
                 confirm_overwrite_func=self._confirm_overwrite,
+                progress_callback=self._set_progress,
             )
 
         raise ValueError("mode must be video or audio")
@@ -220,6 +222,10 @@ class DownloadWorker(QObject):
         self.log_message.emit(message)
         self._update_status_from_log(message)
 
+    def _set_progress(self, percent: int) -> None:
+        self.progress_busy.emit(False)
+        self.progress_changed.emit(max(0, min(100, int(percent))))
+
     def _update_status_from_log(self, message: str) -> None:
         if message.startswith("[") and "] " in message:
             message = message.split("] ", 1)[1]
@@ -235,7 +241,7 @@ class DownloadWorker(QObject):
             self.progress_changed.emit(0)
             return
 
-        if message.startswith("Конвертирую"):
+        if message.startswith("Конвертирую") or message.startswith("Собираю"):
             self.status_message.emit("Конвертация")
             self.progress_busy.emit(True)
             return

@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -116,6 +117,9 @@ class GuiTests(unittest.TestCase):
         tabs = window.findChild(QTabWidget)
         settings_tab = tabs.widget(3)
         existing_process_limit = settings_tab.process_worker_limit_value()
+        current_index = settings_tab.download_worker_limit_select.currentIndex()
+        next_index = (current_index + 1) % settings_tab.download_worker_limit_select.count()
+        next_download_limit = int(settings_tab.download_worker_limit_select.itemData(next_index))
         saved_config = AppConfig(
             download_dir=Path("content"),
             audio_download_dir=Path("content/audio"),
@@ -131,9 +135,9 @@ class GuiTests(unittest.TestCase):
             patch("engine.gui.app.save_parallel_limits") as save_parallel_limits,
             patch("engine.gui.app.load_config", return_value=saved_config),
         ):
-            settings_tab.download_worker_limit_select.setCurrentIndex(5)
+            settings_tab.download_worker_limit_select.setCurrentIndex(next_index)
 
-        save_parallel_limits.assert_called_once_with(6, existing_process_limit)
+        save_parallel_limits.assert_called_once_with(next_download_limit, existing_process_limit)
         self.assertIs(window.config, saved_config)
         self.assertFalse(hasattr(settings_tab, "save_button"))
         self.assertFalse(hasattr(settings_tab, "status_label"))
@@ -357,6 +361,47 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(download_audio_bulk.call_args.kwargs["config"].download_worker_limit, 4)
         self.assertEqual(download_audio_bulk.call_args.kwargs["config"].process_worker_limit, 4)
         self.assertIs(download_audio_bulk.call_args.kwargs["cancel_token"], worker.cancel_token)
+
+    def test_audio_worker_routes_progress_to_progress_bar_without_log_percentages(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            config = AppConfig(
+                download_dir=Path("content"),
+                audio_download_dir=Path("content/audio"),
+                default_video_quality=720,
+                default_mp3_bitrate=320,
+                ffmpeg_path="ffmpeg",
+                full_auto=True,
+                worker_limit=4,
+            )
+            worker = DownloadWorker(
+                mode=AUDIO_MODE,
+                url="https://youtu.be/abc123",
+                output_dir=output_dir,
+            )
+            logs = []
+            progress_values = []
+            worker.log_message.connect(logs.append)
+            worker.progress_changed.connect(progress_values.append)
+
+            def download_audio(**kwargs):
+                kwargs["print_func"]("Скачиваю аудио-дорожку: 160kbps webm")
+                kwargs["progress_callback"](42)
+                kwargs["print_func"]("Готово. MP3 сохранён.")
+                return 0
+
+            with (
+                patch("engine.gui.workers.load_config", return_value=config),
+                patch("engine.gui.workers.SQLiteDownloadHistory.default", return_value=object()),
+                patch("engine.gui.workers.YouTube", return_value=SimpleNamespace(title="Title")),
+                patch("engine.gui.workers.download_audio", side_effect=download_audio) as download_audio_mock,
+            ):
+                result = worker._run_download()
+
+        self.assertEqual(result, 0)
+        self.assertIn(42, progress_values)
+        self.assertTrue(callable(download_audio_mock.call_args.kwargs["progress_callback"]))
+        self.assertFalse(any("42%" in line for line in logs))
 
 
 if __name__ == "__main__":

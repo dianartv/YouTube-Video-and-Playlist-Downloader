@@ -131,27 +131,26 @@ class AudioServiceTests(unittest.TestCase):
 
         popen.assert_not_called()
 
-    def test_convert_to_mp3_cancellable_drains_ffmpeg_output_while_waiting(self):
+    def test_convert_to_mp3_cancellable_drains_ffmpeg_progress_output(self):
         class FakeProcess:
             def __init__(self):
-                self.returncode = 0
-                self.communicate_calls = 0
+                self.stdout = [
+                    b"out_time_ms=5000000\n",
+                    b"out_time_ms=10000000\n",
+                    b"progress=end\n",
+                ]
+                self.wait_calls = 0
 
-            def communicate(self, timeout=None):
-                self.communicate_calls += 1
-                if self.communicate_calls == 1:
-                    raise subprocess.TimeoutExpired("ffmpeg", timeout)
-
-                return b"", b""
-
-            def poll(self):
-                return self.returncode
+            def wait(self):
+                self.wait_calls += 1
+                return 0
 
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = Path(temp_dir) / "audio.webm"
             output_path = Path(temp_dir) / "audio.mp3"
             input_path.write_bytes(b"fake audio")
             fake_process = FakeProcess()
+            progress = []
 
             with (
                 patch(
@@ -167,11 +166,15 @@ class AudioServiceTests(unittest.TestCase):
                         source_bitrate_kbps=160,
                         max_bitrate_kbps=320,
                         cancel_token=CancellationToken(),
+                        duration_seconds=10,
+                        progress_callback=progress.append,
                     ),
                     output_path,
                 )
 
-        self.assertEqual(fake_process.communicate_calls, 2)
+        self.assertEqual(fake_process.wait_calls, 1)
+        self.assertIn("FFmpeg: 50%", progress)
+        self.assertIn("FFmpeg: 100%", progress)
 
 
 if __name__ == "__main__":

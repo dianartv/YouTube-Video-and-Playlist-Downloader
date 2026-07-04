@@ -230,6 +230,7 @@ class FullAutoDownloadTests(unittest.TestCase):
             save_to=str(Path("content/audio")),
             filename="video.webm",
             interrupt_checker=None,
+            progress_callback=None,
         )
         convert.assert_called_once()
         self.assertIn(
@@ -271,6 +272,7 @@ class FullAutoDownloadTests(unittest.TestCase):
             save_to=str(Path("content/audio")),
             filename="Title.webm",
             interrupt_checker=None,
+            progress_callback=None,
         )
         self.assertTrue(
             any("Скачиваю аудио-дорожку: 160kbps webm" in line for line in output)
