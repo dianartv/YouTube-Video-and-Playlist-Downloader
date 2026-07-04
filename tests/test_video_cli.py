@@ -14,6 +14,7 @@ from engine.domain.naming import make_playlist_directory_name
 from engine.domain.selection import choose_audio_stream, choose_video_resolution
 from engine.domain.download_history import DownloadRecord
 from engine.service.config import AppConfig
+from engine.service.cancellation import CancellationToken, OperationCancelled
 from engine.cli.handlers import (
     download_media_interactive,
 )
@@ -474,6 +475,33 @@ class DownloadMediaInteractiveTests(unittest.TestCase):
 
 
 class PlaylistDownloadTests(unittest.TestCase):
+    def test_playlist_download_stops_when_cancelled_before_processing(self):
+        config = AppConfig(
+            download_dir=Path("content"),
+            audio_download_dir=Path("content/audio"),
+            default_video_quality=720,
+            default_mp3_bitrate=320,
+            ffmpeg_path="ffmpeg",
+            full_auto=True,
+        )
+        token = CancellationToken()
+        token.cancel()
+
+        with self.assertRaises(OperationCancelled):
+            download_playlist(
+                playlist=SimpleNamespace(
+                    title="Videos",
+                    video_urls=["https://youtu.be/one"],
+                ),
+                media_mode="video",
+                config=config,
+                input_func=lambda prompt: self.fail("input should not be called"),
+                print_func=lambda message: self.fail("print should not be called"),
+                prompt_video_resolution_func=lambda *args: self.fail("video prompt should not be called"),
+                prompt_audio_stream_func=lambda *args: self.fail("audio prompt should not be called"),
+                cancel_token=token,
+            )
+
     def test_playlist_directory_name_removes_forbidden_path_characters(self):
         self.assertEqual(make_playlist_directory_name("My/Playlist?"), "MyPlaylist")
         self.assertEqual(make_playlist_directory_name("../"), "playlist")

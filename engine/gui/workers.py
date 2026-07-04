@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 from pytubefix.exceptions import LiveStreamEnded, LiveStreamError, VideoUnavailable
 
 from engine.application.download_audio import download_audio
+from engine.application.download_playlist import download_playlist
 from engine.application.download_video import download_video
 from engine.cli.prompts import prompt_audio_stream, prompt_video_resolution
 from engine.domain.download_history import DownloadRecord
@@ -14,7 +15,7 @@ from engine.service.cancellation import CancellationToken, OperationCancelled
 from engine.service.config import AppConfig, ensure_env_file, load_config
 from engine.service.download_history import SQLiteDownloadHistory
 from engine.service.logger import configure_file_logger, logger
-from engine.youtube_tools.youtube_tools import YouTube
+from engine.youtube_tools.youtube_tools import Playlist, YouTube
 
 
 @dataclass
@@ -45,12 +46,14 @@ class DownloadWorker(QObject):
         url: str,
         output_dir: Path,
         video_quality: int | None = None,
+        is_playlist: bool = False,
     ) -> None:
         super().__init__()
         self.mode = mode
         self.url = url
         self.output_dir = output_dir
         self.video_quality = video_quality
+        self.is_playlist = is_playlist
         self.cancel_token = CancellationToken()
 
     def cancel(self) -> None:
@@ -112,6 +115,9 @@ class DownloadWorker(QObject):
 
         self.status_message.emit("Получение данных YouTube")
         self.progress_busy.emit(True)
+        if self.is_playlist:
+            return self._run_playlist_download(config, download_history)
+
         video = YouTube(url=self.url)
         self.cancel_token.raise_if_cancelled()
         self._print(f"Видео: {video.title}")
@@ -142,6 +148,23 @@ class DownloadWorker(QObject):
             )
 
         raise ValueError("mode must be video or audio")
+
+    def _run_playlist_download(self, config: AppConfig, download_history: SQLiteDownloadHistory) -> int:
+        self.status_message.emit("Получение данных плейлиста")
+        playlist = Playlist(self.url)
+        self.cancel_token.raise_if_cancelled()
+        return download_playlist(
+            playlist=playlist,
+            media_mode=self.mode,
+            config=config,
+            input_func=_no_input,
+            print_func=self._print,
+            prompt_video_resolution_func=prompt_video_resolution,
+            prompt_audio_stream_func=prompt_audio_stream,
+            download_history=download_history,
+            confirm_overwrite_func=self._confirm_overwrite,
+            cancel_token=self.cancel_token,
+        )
 
     def _confirm_overwrite(
         self,

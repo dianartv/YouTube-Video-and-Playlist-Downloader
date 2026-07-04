@@ -10,6 +10,7 @@ from engine.application.download_video import download_video
 from engine.domain.download_history import DownloadHistory
 from engine.domain.modes import AUDIO_MODE, VIDEO_MODE
 from engine.domain.naming import DEFAULT_PLAYLIST_DIR_NAME, make_playlist_directory_name
+from engine.service.cancellation import CancellationToken, OperationCancelled
 from engine.service.logger import logger
 from engine.youtube_tools.youtube_tools import Playlist, YouTube
 
@@ -35,14 +36,20 @@ def download_playlist(
     prompt_audio_stream_func: PromptAudioStreamFunc,
     download_history: DownloadHistory | None = None,
     confirm_overwrite_func: ConfirmOverwriteFunc | None = None,
+    cancel_token: CancellationToken | None = None,
 ) -> int:
     if media_mode not in {VIDEO_MODE, AUDIO_MODE}:
         raise ValueError("media_mode must be video or audio")
+
+    if cancel_token is not None:
+        cancel_token.raise_if_cancelled()
 
     video_urls = list(playlist.video_urls)
     if not video_urls:
         print_func("Плейлист пуст.")
         return 1
+    if cancel_token is not None:
+        cancel_token.raise_if_cancelled()
 
     playlist_title = playlist.title or DEFAULT_PLAYLIST_DIR_NAME
     playlist_dir = get_playlist_output_dir(config, media_mode, playlist_title)
@@ -61,9 +68,14 @@ def download_playlist(
     failed_count = 0
 
     for index, video_url in enumerate(video_urls, start=1):
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
+
         print_func(f"[{index}/{len(video_urls)}] {video_url}")
         try:
             video = YouTube(url=video_url)
+            if cancel_token is not None:
+                cancel_token.raise_if_cancelled()
             print_func(f"Видео: {video.title}")
             if media_mode == AUDIO_MODE:
                 result = download_audio(
@@ -74,6 +86,7 @@ def download_playlist(
                     prompt_audio_stream_func=prompt_audio_stream_func,
                     download_history=download_history,
                     confirm_overwrite_func=confirm_overwrite_func,
+                    cancel_token=cancel_token,
                 )
             else:
                 result = download_video(
@@ -85,6 +98,7 @@ def download_playlist(
                     prompt_audio_stream_func=prompt_audio_stream_func,
                     download_history=download_history,
                     confirm_overwrite_func=confirm_overwrite_func,
+                    cancel_token=cancel_token,
                 )
         except LiveStreamError:
             logger.warning(f"Трансляция {video_url} ещё идёт.")
@@ -101,6 +115,8 @@ def download_playlist(
             print_func("Пропущено: видео недоступно.")
             failed_count += 1
             continue
+        except OperationCancelled:
+            raise
         except Exception as exc:
             logger.exception(f"Не удалось скачать {video_url}: {exc}")
             print_func(f"Пропущено: ошибка загрузки: {exc}")

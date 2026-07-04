@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Qt, Slot
+from PySide6.QtCore import QThread, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -44,6 +44,15 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.addTab(DownloadTab(mode=VIDEO_MODE, config=self.config, parent_window=self), "Видео")
         tabs.addTab(DownloadTab(mode=AUDIO_MODE, config=self.config, parent_window=self), "Аудио")
+        tabs.addTab(
+            DownloadTab(
+                mode=VIDEO_MODE,
+                config=self.config,
+                parent_window=self,
+                is_playlist=True,
+            ),
+            "Плейлист",
+        )
         self.setCentralWidget(tabs)
         self._apply_style()
 
@@ -68,6 +77,7 @@ class MainWindow(QMainWindow):
             url=url,
             output_dir=output_dir,
             video_quality=tab.video_quality_value(),
+            is_playlist=tab.is_playlist,
         )
         thread = QThread(self)
         worker.moveToThread(thread)
@@ -193,13 +203,27 @@ class MainWindow(QMainWindow):
 
 
 class DownloadTab(QWidget):
-    def __init__(self, *, mode: str, config, parent_window: MainWindow) -> None:
+    def __init__(
+        self,
+        *,
+        mode: str,
+        config,
+        parent_window: MainWindow,
+        is_playlist: bool = False,
+    ) -> None:
         super().__init__()
-        self.mode = mode
+        self._mode = mode
+        self.is_playlist = is_playlist
         self.parent_window = parent_window
 
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Вставьте ссылку на YouTube")
+        placeholder = "Вставьте ссылку на плейлист" if is_playlist else "Вставьте ссылку на YouTube"
+        self.url_input.setPlaceholderText(placeholder)
+
+        self.media_type_select = QComboBox()
+        if is_playlist:
+            self.media_type_select.addItem("Видео", VIDEO_MODE)
+            self.media_type_select.addItem("Аудио", AUDIO_MODE)
 
         self.quality_select = QComboBox()
         for quality in VIDEO_QUALITIES:
@@ -209,7 +233,11 @@ class DownloadTab(QWidget):
         default_index = VIDEO_QUALITIES.index(default_quality)
         self.quality_select.setCurrentIndex(default_index)
 
-        default_dir = config.download_dir if mode == VIDEO_MODE else config.audio_download_dir
+        default_dir = (
+            config.download_dir
+            if mode == VIDEO_MODE or is_playlist
+            else config.audio_download_dir
+        )
         self.output_dir_input = QLineEdit(str(default_dir))
         self.browse_button = QPushButton("Выбрать")
         self.browse_button.clicked.connect(self.choose_output_dir)
@@ -243,12 +271,18 @@ class DownloadTab(QWidget):
         form.addWidget(self.url_input, 0, 1, 1, 2)
 
         row = 1
-        if self.mode == VIDEO_MODE:
+        if self.is_playlist:
+            form.addWidget(QLabel("Тип"), row, 0)
+            form.addWidget(self.media_type_select, row, 1, 1, 2)
+            self.quality_select.hide()
+            row += 1
+        elif self.mode == VIDEO_MODE:
             form.addWidget(QLabel("Качество"), row, 0)
             form.addWidget(self.quality_select, row, 1, 1, 2)
             row += 1
         else:
             self.quality_select.hide()
+            self.media_type_select.hide()
 
         form.addWidget(QLabel("Папка"), row, 0)
         form.addWidget(self.output_dir_input, row, 1)
@@ -285,6 +319,13 @@ class DownloadTab(QWidget):
     def url_value(self) -> str:
         return self.url_input.text().strip()
 
+    @property
+    def mode(self) -> str:
+        if self.is_playlist:
+            return str(self.media_type_select.currentData())
+
+        return self._mode
+
     def output_dir_value(self) -> Path:
         return Path(self.output_dir_text())
 
@@ -292,7 +333,7 @@ class DownloadTab(QWidget):
         return self.output_dir_input.text().strip()
 
     def video_quality_value(self) -> int | None:
-        if self.mode != VIDEO_MODE:
+        if self.is_playlist or self.mode != VIDEO_MODE:
             return None
 
         return int(self.quality_select.currentData())
