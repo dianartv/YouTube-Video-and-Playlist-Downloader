@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 from pytubefix.exceptions import LiveStreamEnded, LiveStreamError, VideoUnavailable
 
 from engine.application.download_audio import download_audio
+from engine.application.download_audio_bulk import download_audio_bulk
 from engine.application.download_playlist import download_playlist
 from engine.application.download_video import download_video
 from engine.cli.prompts import prompt_audio_stream, prompt_video_resolution
@@ -47,6 +48,7 @@ class DownloadWorker(QObject):
         output_dir: Path,
         video_quality: int | None = None,
         is_playlist: bool = False,
+        bulk_urls: list[str] | None = None,
     ) -> None:
         super().__init__()
         self.mode = mode
@@ -54,6 +56,7 @@ class DownloadWorker(QObject):
         self.output_dir = output_dir
         self.video_quality = video_quality
         self.is_playlist = is_playlist
+        self.bulk_urls = [url.strip() for url in bulk_urls or [] if url.strip()]
         self.cancel_token = CancellationToken()
 
     def cancel(self) -> None:
@@ -117,6 +120,8 @@ class DownloadWorker(QObject):
         self.progress_busy.emit(True)
         if self.is_playlist:
             return self._run_playlist_download(config, download_history)
+        if self.bulk_urls:
+            return self._run_bulk_download(config, download_history)
 
         video = YouTube(url=self.url)
         self.cancel_token.raise_if_cancelled()
@@ -148,6 +153,22 @@ class DownloadWorker(QObject):
             )
 
         raise ValueError("mode must be video or audio")
+
+    def _run_bulk_download(self, config: AppConfig, download_history: SQLiteDownloadHistory) -> int:
+        if self.mode != AUDIO_MODE:
+            raise ValueError("bulk mode supports audio only")
+
+        self.status_message.emit("Скачивание пачки")
+        return download_audio_bulk(
+            urls=self.bulk_urls,
+            config=config,
+            input_func=_no_input,
+            print_func=self._print,
+            prompt_audio_stream_func=prompt_audio_stream,
+            download_history=download_history,
+            confirm_overwrite_func=self._confirm_overwrite,
+            cancel_token=self.cancel_token,
+        )
 
     def _run_playlist_download(self, config: AppConfig, download_history: SQLiteDownloadHistory) -> int:
         self.status_message.emit("Получение данных плейлиста")
@@ -200,6 +221,9 @@ class DownloadWorker(QObject):
         self._update_status_from_log(message)
 
     def _update_status_from_log(self, message: str) -> None:
+        if message.startswith("[") and "] " in message:
+            message = message.split("] ", 1)[1]
+
         if message.startswith("Скачиваю"):
             self.status_message.emit("Скачивание")
             self.progress_busy.emit(True)

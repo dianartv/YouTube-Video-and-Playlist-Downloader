@@ -72,7 +72,8 @@ class MainWindow(QMainWindow):
             return
 
         url = tab.url_value()
-        if not url:
+        bulk_urls = tab.bulk_urls_value()
+        if not url and not bulk_urls:
             QMessageBox.warning(self, "Нет ссылки", "Вставьте ссылку на YouTube.")
             return
 
@@ -84,10 +85,11 @@ class MainWindow(QMainWindow):
         tab.prepare_for_download()
         worker = DownloadWorker(
             mode=tab.mode,
-            url=url,
+            url="" if bulk_urls else url,
             output_dir=output_dir,
             video_quality=tab.video_quality_value(),
             is_playlist=tab.is_playlist,
+            bulk_urls=bulk_urls,
         )
         thread = QThread(self)
         worker.moveToThread(thread)
@@ -236,6 +238,10 @@ class DownloadTab(QWidget):
             self.media_type_select.addItem("Видео", VIDEO_MODE)
             self.media_type_select.addItem("Аудио", AUDIO_MODE)
 
+        self.bulk_urls_input = QPlainTextEdit()
+        self.bulk_urls_input.setPlaceholderText("Ссылка на каждой строке")
+        self.bulk_urls_input.setFixedHeight(92)
+
         self.quality_select = QComboBox()
         for quality in VIDEO_QUALITIES:
             label = "2K (1440p)" if quality == 1440 else f"{quality}p"
@@ -250,7 +256,7 @@ class DownloadTab(QWidget):
             else config.audio_download_dir
         )
         self.output_dir_input = QLineEdit(str(default_dir))
-        self.browse_button = QPushButton("Выбрать")
+        self.browse_button = QPushButton("Обзор")
         self.browse_button.clicked.connect(self.choose_output_dir)
 
         self.download_button = QPushButton("Скачать")
@@ -260,7 +266,7 @@ class DownloadTab(QWidget):
         self.cancel_button.clicked.connect(lambda: self.parent_window.request_cancel(self))
 
         self.status_label = QLabel("Ожидание")
-        self.show_output_button = QPushButton("Показать в проводнике")
+        self.show_output_button = QPushButton("Показать")
         self.show_output_button.hide()
         self.show_output_button.clicked.connect(self.open_output_dir)
         self.progress = QProgressBar()
@@ -286,6 +292,13 @@ class DownloadTab(QWidget):
         form.addWidget(self.url_input, 0, 1, 1, 2)
 
         row = 1
+        if self._supports_bulk():
+            form.addWidget(QLabel("Список ссылок"), row, 0)
+            form.addWidget(self.bulk_urls_input, row, 1, 1, 2)
+            row += 1
+        else:
+            self.bulk_urls_input.hide()
+
         if self.is_playlist:
             form.addWidget(QLabel("Тип"), row, 0)
             form.addWidget(self.media_type_select, row, 1, 1, 2)
@@ -336,6 +349,16 @@ class DownloadTab(QWidget):
 
     def url_value(self) -> str:
         return self.url_input.text().strip()
+
+    def bulk_urls_value(self) -> list[str]:
+        if not self._supports_bulk():
+            return []
+
+        return [
+            line.strip()
+            for line in self.bulk_urls_input.toPlainText().splitlines()
+            if line.strip()
+        ]
 
     @property
     def mode(self) -> str:
@@ -424,6 +447,9 @@ class DownloadTab(QWidget):
             return
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_dir.resolve())))
+
+    def _supports_bulk(self) -> bool:
+        return not self.is_playlist and self._mode == AUDIO_MODE
 
 
 class SettingsTab(QWidget):

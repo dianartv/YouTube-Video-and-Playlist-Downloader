@@ -16,6 +16,48 @@ from engine.gui.app import MainWindow
 from engine.service.config import AppConfig
 
 
+class SignalStub:
+    def __init__(self):
+        self.slots = []
+
+    def connect(self, slot):
+        self.slots.append(slot)
+
+
+class ThreadStub:
+    def __init__(self, *args, **kwargs):
+        self.started = SignalStub()
+        self.finished = SignalStub()
+
+    def start(self):
+        pass
+
+    def quit(self):
+        pass
+
+    def deleteLater(self):
+        pass
+
+
+class WorkerStub:
+    def __init__(self):
+        self.log_message = SignalStub()
+        self.status_message = SignalStub()
+        self.progress_changed = SignalStub()
+        self.progress_busy = SignalStub()
+        self.overwrite_requested = SignalStub()
+        self.finished = SignalStub()
+
+    def moveToThread(self, thread):
+        pass
+
+    def run(self):
+        pass
+
+    def deleteLater(self):
+        pass
+
+
 class GuiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -44,6 +86,30 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(playlist_tab.mode, AUDIO_MODE)
         self.assertIsNone(playlist_tab.video_quality_value())
+
+    def test_audio_bulk_field_is_passed_to_worker_and_single_url_is_ignored(self):
+        window = MainWindow()
+        tabs = window.findChild(QTabWidget)
+        audio_tab = tabs.widget(1)
+        audio_tab.url_input.setText("")
+        audio_tab.bulk_urls_input.setPlainText("https://one\n\n https://two ")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audio_tab.output_dir_input.setText(temp_dir)
+            worker = WorkerStub()
+            thread = ThreadStub()
+            with (
+                patch("engine.gui.app.DownloadWorker", return_value=worker) as worker_class,
+                patch("engine.gui.app.QThread", return_value=thread),
+            ):
+                window.start_download(audio_tab)
+
+        self.assertEqual(worker_class.call_args.kwargs["url"], "")
+        self.assertEqual(
+            worker_class.call_args.kwargs["bulk_urls"],
+            ["https://one", "https://two"],
+        )
+        self.assertEqual(worker_class.call_args.kwargs["mode"], AUDIO_MODE)
 
     def test_settings_tab_saves_worker_limit(self):
         window = MainWindow()
@@ -253,6 +319,40 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(download_playlist.call_args.kwargs["config"].audio_download_dir, output_dir)
         self.assertEqual(download_playlist.call_args.kwargs["config"].worker_limit, 5)
         self.assertIs(download_playlist.call_args.kwargs["cancel_token"], worker.cancel_token)
+
+    def test_audio_bulk_worker_routes_to_bulk_downloader(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            config = AppConfig(
+                download_dir=Path("content"),
+                audio_download_dir=Path("content/audio"),
+                default_video_quality=720,
+                default_mp3_bitrate=320,
+                ffmpeg_path="ffmpeg",
+                full_auto=True,
+                worker_limit=4,
+            )
+            worker = DownloadWorker(
+                mode=AUDIO_MODE,
+                url="",
+                output_dir=output_dir,
+                bulk_urls=["one", "two"],
+            )
+
+            with (
+                patch("engine.gui.workers.load_config", return_value=config),
+                patch("engine.gui.workers.SQLiteDownloadHistory.default", return_value=object()),
+                patch("engine.gui.workers.YouTube") as youtube,
+                patch("engine.gui.workers.download_audio_bulk", return_value=0) as download_audio_bulk,
+            ):
+                result = worker._run_download()
+
+        self.assertEqual(result, 0)
+        youtube.assert_not_called()
+        download_audio_bulk.assert_called_once()
+        self.assertEqual(download_audio_bulk.call_args.kwargs["urls"], ["one", "two"])
+        self.assertEqual(download_audio_bulk.call_args.kwargs["config"].audio_download_dir, output_dir)
+        self.assertIs(download_audio_bulk.call_args.kwargs["cancel_token"], worker.cancel_token)
 
 
 if __name__ == "__main__":

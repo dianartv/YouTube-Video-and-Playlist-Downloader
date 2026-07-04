@@ -105,7 +105,7 @@ class SQLiteDownloadHistory:
             connection.close()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(self.database_path, timeout=30)
         connection.row_factory = sqlite3.Row
         return connection
 
